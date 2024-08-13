@@ -1,0 +1,19 @@
+
+## main setting
+
+windowName: 'draw_pad'
+testFile: 'test1.png'
+quitKey: 'q'
+
+## brush
+
+brush:
+  radius: 3
+  b: 0
+  g: 0
+  r: 0
+
+## line sampling
+
+sampling:
+  interval: 50 # ms
