@@ -8,12 +8,11 @@ quitKey: 'q'
 ## brush
 
 brush:
-  radius: 3
+  radius: 2
   b: 0
   g: 0
   r: 0
 
-## line sampling
-
-sampling:
-  interval: 50 # ms
+laplacian_smoothing:
+  iter: 10
+  lambda: 0.5
