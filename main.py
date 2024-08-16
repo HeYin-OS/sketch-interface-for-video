@@ -8,7 +8,7 @@ import line_drawer
 
 def main():
     cfg = read_yaml()
-    drawer = line_drawer.LineDrawer(cfg['brush']['radius'], cfg['brush']['b'], cfg['brush']['g'], cfg['brush']['r'])
+    drawer = line_drawer.LineDrawer(cfg['brush']['radius'], cfg['brush']['b'], cfg['brush']['g'], cfg['brush']['r'], cfg['laplacian_smoothing']['iter'], cfg['laplacian_smoothing']['lambda'])
     image = cv.imread(cfg['testFile'])
     if image is None:
         print("No image")
@@ -17,7 +17,6 @@ def main():
     cv.imshow(cfg['windowName'], image)
     cv.setMouseCallback("%s" % cfg['windowName'], drawer.draw_line)
     while True:
-        cv.imshow(cfg['windowName'], image)
         if cv.waitKey(1) & 0xFF == ord(cfg['quitKey']):
             break
     cv.destroyAllWindows()
