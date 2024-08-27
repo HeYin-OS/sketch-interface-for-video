@@ -13,6 +13,8 @@ brush:
   g: 0
   r: 0
 
+## laplacian setting
+
 laplacian_smoothing:
   iter: 10
   lambda: 0.5

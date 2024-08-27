@@ -26,6 +26,8 @@ class LineDrawer(metaclass=Singleton):
     __windowName = None
     __iter = 0
     __lambda = 0.0
+    __gs_img = None
+    __ed_img = None
     coordinate_container = []
     stroke_container = []
 
@@ -37,17 +39,22 @@ class LineDrawer(metaclass=Singleton):
             self.__lMousePressed()
 
         elif event == cv.EVENT_LBUTTONUP:
-            self.laplacian_smoothing()
-            self.draw_points()
-            if len(self.coordinate_container) != 0:
+            self.laplacian_smoothing()  # laplacian optimization
+            self.restore_img()  # recover the original canvas
+            self.draw_points()  # draw the points
+            self.draw_lines()  # draw the connected lines
+            cv.imshow(self.get_window(), self.get_image())
+            if len(self.coordinate_container) != 0:  # add this stroke to the container
                 self.stroke_container.append(self.coordinate_container)
-            self.backup_img()
+            self.backup_img()  # save current status: strokes + image
             self.__lMouseReleased()
 
         elif event == cv.EVENT_MOUSEMOVE:
             if self.__is_lMousePressed():
                 self.collect_coordinates(x, y)
                 self.draw_points()
+                self.draw_lines()
+                cv.imshow(self.get_window(), self.get_image())
 
     def collect_coordinates(self, x, y):
         self.coordinate_container.append([x, y])
@@ -73,10 +80,15 @@ class LineDrawer(metaclass=Singleton):
         pass
 
     def draw_points(self):
-        self.restore_img()
         for point in self.coordinate_container:
             cv.circle(self.get_image(), point, self.get_radius(), self.get_bgr(), -1)
-        cv.imshow(self.get_window(), self.get_image())
+
+    def draw_lines(self):
+        for i in range(len(self.coordinate_container) - 1):
+            cv.line(self.get_image(),
+                    (self.coordinate_container[i][0], self.coordinate_container[i][1]),
+                    (self.coordinate_container[i + 1][0], self.coordinate_container[i + 1][1]),
+                    self.get_bgr(), self.get_radius(), lineType=cv.LINE_AA, shift=0)
 
     # creator
     def __init__(self, radius, b, g, r, iteration, lbd):
@@ -118,6 +130,24 @@ class LineDrawer(metaclass=Singleton):
         self.__windowName = window
         return self
 
+    def bind_gs_img(self, gs_img):
+        self.__gs_img = gs_img
+        return self
+
+    def pre_processing(self):
+        self.__generate_gs_img()
+        self.__edge_detection()
+        return self
+
+    def __edge_detection(self):
+        grad_x = cv.Sobel(self.get_gs_img(), cv.CV_64F, 1, 0, ksize=3)
+        grad_y = cv.Sobel(self.get_gs_img(), cv.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x ** 2 + grad_y ** 2)
+        normalized_gradient = cv.normalize(gradient_magnitude, None, 0, 1, cv.NORM_MINMAX)
+        threshold_value = 0.2
+        _, threshold_gradient = cv.threshold(normalized_gradient, threshold_value, 1.0, cv.THRESH_BINARY)
+        self.__ed_img = threshold_gradient
+
     def get_image(self):
         return self.__image
 
@@ -139,6 +169,12 @@ class LineDrawer(metaclass=Singleton):
     def get_lambda(self):
         return self.__lambda
 
+    def get_gs_img(self):
+        return self.__gs_img
+
+    def get_ed_img(self):
+        return self.__ed_img
+
     def backup_img(self):
         self.__img_save_point = self.get_image().copy()
 
@@ -157,3 +193,6 @@ class LineDrawer(metaclass=Singleton):
     def __lMouseReleased(self):
         self.__lMouseHolding = False
         return self
+
+    def __generate_gs_img(self):
+        self.__gs_img = cv.cvtColor(self.get_image(), cv.COLOR_BGR2GRAY)
