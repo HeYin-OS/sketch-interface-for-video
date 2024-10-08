@@ -1,66 +1,70 @@
+import random
+
 import cv2 as cv
 import numpy as np
 from pypattyrn.creational.singleton import Singleton
 
-
-#
-# Already converted into Class module.
-#
-# def draw_line(event, x, y, flags, param):
-#     global drawing, lMousePressed
-#     if event == cv.EVENT_LBUTTONDOWN:
-#         lMousePressed = True
-#     elif event == cv.EVENT_MOUSEMOVE and lMousePressed:
-#         drawing = True
-#         cv.circle(param[0], (x, y), param[1], param[2], -1)
-#         cv.imshow(param[3], param[0])
-#     elif event == cv.EVENT_LBUTTONUP:
-#         lMousePressed = False
+from test_func import test_img_show
 
 
-# drawer class for openCV event slot function
 class LineDrawer(metaclass=Singleton):
-    __lMouseHolding = False  # continuously pressing LM?
-    __image = None
-    __img_save_point = None
-    __windowName = None
-    __iter = 0
-    __lambda = 0.0
-    __gs_img = None
-    __ed_img = None
+    is_LM_holding = False
+    img_work_on = None
+    img_save_point = None
+    windowName = None
+    iter = 0
+    radius = 0
+    b, g, r = 0.0, 0.0, 0.0
+    my_lambda = 0.0
+    threshold = 0.0
+    circle_sampling_time = 0
+    circle_sampling_r = 0
+    edge_detection_img = None
     coordinate_container = []
     stroke_container = []
+    sampling_point_coordinate_container = []  # salient points with maximal gradient magnitude
+    candidates_container = []  # candidates set Q a.k.a. the complete bipartite graph
 
-    # bind to mouse event of openCV, draw lines
+    def __init__(self, radius, b, g, r, iteration, lbd, threshold, circle_sampling_time, circle_sampling_r):
+        self.radius = radius
+        self.b = b
+        self.g = g
+        self.r = r
+        self.iter = iteration
+        self.my_lambda = lbd
+        self.threshold = threshold
+        self.circle_sampling_time = circle_sampling_time
+        self.circle_sampling_r = circle_sampling_r
+
     def draw_line(self, event, x, y, flags, param):
         if event == cv.EVENT_LBUTTONDOWN:
             self.coordinate_container = []
-            self.backup_img()
-            self.__lMousePressed()
+            self.img_save_point = self.img_work_on.copy()
+            self.is_LM_holding = True
 
         elif event == cv.EVENT_LBUTTONUP:
             self.laplacian_smoothing()  # laplacian optimization
-            self.restore_img()  # recover the original canvas
+            self.img_work_on = self.img_save_point.copy()  # recover the original canvas
             self.draw_points()  # draw the points
             self.draw_lines()  # draw the connected lines
-            cv.imshow(self.get_window(), self.get_image())
+            cv.imshow(self.windowName, self.img_work_on)
             if len(self.coordinate_container) != 0:  # add this stroke to the container
                 self.stroke_container.append(self.coordinate_container)
-            self.backup_img()  # save current status: strokes + image
-            self.__lMouseReleased()
+            self.img_save_point = self.img_work_on.copy()
+            self.is_LM_holding = False
 
         elif event == cv.EVENT_MOUSEMOVE:
-            if self.__is_lMousePressed():
+            if self.is_LM_holding:
                 self.collect_coordinates(x, y)
                 self.draw_points()
                 self.draw_lines()
-                cv.imshow(self.get_window(), self.get_image())
+                cv.imshow(self.windowName, self.img_work_on)
 
     def collect_coordinates(self, x, y):
         self.coordinate_container.append([x, y])
 
     def laplacian_smoothing(self):
-        for _ in range(self.get_iter()):
+        for _ in range(self.iter):
             new_coordinates = self.coordinate_container.copy()
 
             for i in range(1, len(self.coordinate_container) - 1):
@@ -68,131 +72,71 @@ class LineDrawer(metaclass=Singleton):
                 current_coordinate = self.coordinate_container[i]
                 next_coordinate = self.coordinate_container[i + 1]
 
-                new_x = current_coordinate[0] + self.get_lambda() * (prev_coordinate[0] + next_coordinate[0] - 2 * current_coordinate[0])
-                new_y = current_coordinate[1] + self.get_lambda() * (prev_coordinate[1] + next_coordinate[1] - 2 * current_coordinate[1])
+                new_x = current_coordinate[0] + self.my_lambda * (prev_coordinate[0] + next_coordinate[0] - 2 * current_coordinate[0])
+                new_y = current_coordinate[1] + self.my_lambda * (prev_coordinate[1] + next_coordinate[1] - 2 * current_coordinate[1])
 
                 new_coordinates[i] = (int(new_x), int(new_y))
 
             self.coordinate_container = new_coordinates.copy()
 
     def insert_points(self):
-
         pass
 
     def draw_points(self):
         for point in self.coordinate_container:
-            cv.circle(self.get_image(), point, self.get_radius(), self.get_bgr(), -1)
+            cv.circle(self.img_work_on, point, self.radius, [self.b, self.g, self.r], -1)
 
     def draw_lines(self):
         for i in range(len(self.coordinate_container) - 1):
-            cv.line(self.get_image(),
+            cv.line(self.img_work_on,
                     (self.coordinate_container[i][0], self.coordinate_container[i][1]),
                     (self.coordinate_container[i + 1][0], self.coordinate_container[i + 1][1]),
-                    self.get_bgr(), self.get_radius(), lineType=cv.LINE_AA, shift=0)
-
-    # creator
-    def __init__(self, radius, b, g, r, iteration, lbd):
-        self.__radius = radius
-        self.__b = b
-        self.__g = g
-        self.__r = r
-        self.__iter = iteration
-        self.__lambda = lbd
-
-    # public func
-    def set_radius(self, radius):
-        self.__radius = radius
-        return self
-
-    def set_blue(self, b):
-        self.__b = b
-        return self
-
-    def set_green(self, g):
-        self.__g = g
-        return self
-
-    def set_red(self, r):
-        self.__r = r
-        return self
-
-    def set_color(self, b, g, r):
-        self.__r = r
-        self.__g = g
-        self.__b = b
-        return self
+                    [self.b, self.g, self.r], self.radius, lineType=cv.LINE_AA, shift=0)
 
     def bind_image(self, img):
-        self.__image = img
+        self.img_work_on = img
         return self
 
     def bind_window(self, window):
-        self.__windowName = window
-        return self
-
-    def bind_gs_img(self, gs_img):
-        self.__gs_img = gs_img
+        self.windowName = window
         return self
 
     def pre_processing(self):
-        self.__generate_gs_img()
         self.__edge_detection()
+        self.__sampling_point_calculation()
+        self.__local_circle_sampling()
         return self
 
     def __edge_detection(self):
-        grad_x = cv.Sobel(self.get_gs_img(), cv.CV_64F, 1, 0, ksize=3)
-        grad_y = cv.Sobel(self.get_gs_img(), cv.CV_64F, 0, 1, ksize=3)
+        gray_img = cv.cvtColor(self.img_work_on, cv.COLOR_BGR2GRAY)
+        grad_x = cv.Sobel(gray_img, cv.CV_64F, 1, 0, ksize=3)
+        grad_y = cv.Sobel(gray_img, cv.CV_64F, 0, 1, ksize=3)
         gradient_magnitude = np.sqrt(grad_x ** 2 + grad_y ** 2)
         normalized_gradient = cv.normalize(gradient_magnitude, None, 0, 1, cv.NORM_MINMAX)
-        threshold_value = 0.2
-        _, threshold_gradient = cv.threshold(normalized_gradient, threshold_value, 1.0, cv.THRESH_BINARY)
-        self.__ed_img = threshold_gradient
+        _, threshold_gradient = cv.threshold(normalized_gradient, self.threshold, 1.0, cv.THRESH_TOZERO)
+        self.edge_detection_img = threshold_gradient
 
-    def get_image(self):
-        return self.__image
+    def __sampling_point_calculation(self):
+        kernel = np.ones((3, 3), np.float64)
+        max_filtered = cv.dilate(self.edge_detection_img, kernel)
+        coordinate_bool_map = (max_filtered == self.edge_detection_img) & (self.edge_detection_img != 0.0)
+        test_img_show("before_sampling", coordinate_bool_map.astype(np.uint8) * 255)
+        self.sampling_point_coordinate_container = np.argwhere(coordinate_bool_map)
 
-    def get_window(self):
-        return self.__windowName
+    def __local_circle_sampling(self):
+        max_y, max_x = self.img_work_on.shape[:2]
+        p_v_i_x = np.random.randint(0, max_x)
+        p_v_i_y = np.random.randint(0, max_y)
+        self.candidates_container.append([p_v_i_x, p_v_i_y])
 
-    def get_radius(self):
-        return self.__radius
+        for point in self.sampling_point_coordinate_container:
+            temp_points_container = []
+            for i in range(0, self.circle_sampling_time):
+                r = self.circle_sampling_r * np.sqrt(random.random())
+                theta = random.random() * 2 * np.pi
+                temp_point = [int(point[0] + r * np.cos(theta)), int(point[1] + r * np.sin(theta))]
+                temp_points_container.append(temp_point)
+            self.candidates_container.append(temp_points_container)
 
-    def get_bgr(self):
-        return [self.__b, self.__g, self.__r]
-
-    def get_checkpoint(self):
-        return self.__img_save_point
-
-    def get_iter(self):
-        return self.__iter
-
-    def get_lambda(self):
-        return self.__lambda
-
-    def get_gs_img(self):
-        return self.__gs_img
-
-    def get_ed_img(self):
-        return self.__ed_img
-
-    def backup_img(self):
-        self.__img_save_point = self.get_image().copy()
-
-    def restore_img(self):
-        self.__image = self.get_checkpoint().copy()
-
-    # private func
-
-    def __is_lMousePressed(self):
-        return self.__lMouseHolding
-
-    def __lMousePressed(self):
-        self.__lMouseHolding = True
-        return self
-
-    def __lMouseReleased(self):
-        self.__lMouseHolding = False
-        return self
-
-    def __generate_gs_img(self):
-        self.__gs_img = cv.cvtColor(self.get_image(), cv.COLOR_BGR2GRAY)
+        print(self.candidates_container[0])
+        print(self.candidates_container[1])

@@ -18,3 +18,11 @@ brush:
 laplacian_smoothing:
   iter: 10
   lambda: 0.5
+
+## optimization
+
+optimization:
+  local:
+    threshold: 0.2
+    circle_sampling: 100
+    radius: 15
