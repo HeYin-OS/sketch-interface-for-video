@@ -13,7 +13,10 @@ def main():
                                     cfg['brush']['g'],
                                     cfg['brush']['r'],
                                     cfg['laplacian_smoothing']['iter'],
-                                    cfg['laplacian_smoothing']['lambda'])
+                                    cfg['laplacian_smoothing']['lambda'],
+                                    cfg['optimization']['local']['threshold'],
+                                    cfg['optimization']['local']['circle_sampling'],
+                                    cfg['optimization']['local']['radius'])
     cfg_test_file = cfg['testFile']
     image = cv.imread(cfg_test_file)
     if image is None:
