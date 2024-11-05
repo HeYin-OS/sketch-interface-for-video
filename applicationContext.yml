@@ -2,7 +2,7 @@
 ## main setting
 
 windowName: 'draw_pad'
-testFile: 'test1.png'
+testFile: 'test2.jpg'
 quitKey: 'q'
 
 ## brush
@@ -30,3 +30,5 @@ optimization:
     sigma_c: 1 # 1 to 3
     sigma_s: 1.6 # 1.6x of sigma_c
     rho: 0.5 # 0.5 to 2.0
+    balancing_weight: 0.5 # weight of filter response
+    edge_weight_limit: 0.07 # limit of

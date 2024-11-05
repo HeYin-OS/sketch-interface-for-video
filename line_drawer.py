@@ -1,15 +1,16 @@
-import random
-
 import cv2
 import numpy
 import numpy as np
 import copy
 from pypattyrn.creational.singleton import Singleton
 import scipy.ndimage as ndimage
+import utils.yaml_reader as yr
 from filter_response import FilterResponse
 from test_func import test_img_show
 
+
 class LineDrawer(metaclass=Singleton):
+    quit_key = None
     is_LM_holding = False
 
     img_origin = None
@@ -40,21 +41,11 @@ class LineDrawer(metaclass=Singleton):
     sigma_c = 0.0
     sigma_s = 0.0
     rho = 0.0
+    balancing_weight = 0.0
+    edge_weight_limit = 0.0
 
-    def __init__(self, radius, b, g, r, iteration, lbd, threshold, circle_sampling_time, circle_sampling_r, sigma_m, sigma_c, sigma_s, rho):
-        self.radius = radius
-        self.b = b
-        self.g = g
-        self.r = r
-        self.iter = iteration
-        self.my_lambda = lbd
-        self.threshold = threshold
-        self.circle_sampling_time = circle_sampling_time
-        self.circle_sampling_r = circle_sampling_r
-        self.sigma_m = sigma_m
-        self.sigma_c = sigma_c
-        self.sigma_s = sigma_s
-        self.rho = rho
+    def __init__(self):
+        self.read_yaml_file()
 
     def draw_line(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -114,16 +105,41 @@ class LineDrawer(metaclass=Singleton):
                      (self.current_stroke[i + 1][0], self.current_stroke[i + 1][1]),
                      [self.b, self.g, self.r], self.radius, lineType=cv2.LINE_AA, shift=0)
 
-    def bind_image(self, img):
-        self.img_origin = img
-        self.img_work_on = img
-        return self
+    def setup(self):
+        cv2.imshow(self.windowName, self.img_work_on)
+        cv2.setMouseCallback("%s" % self.windowName, self.draw_line)
 
-    def bind_window(self, window):
-        self.windowName = window
-        return self
+    def read_yaml_file(self):
+        config = yr.read_yaml()
+        # main settings initialization
+        self.windowName = config['windowName']
+        image = cv2.imread(config['testFile'])
+        if image is None:
+            print("No image")
+            exit(4)
+        self.img_origin = image
+        self.img_work_on = copy.deepcopy(image)
+        self.quit_key = config['quitKey']
+        # brush settings initialization
+        self.radius = config['brush']['radius']
+        self.b = config['brush']['b']
+        self.g = config['brush']['g']
+        self.r = config['brush']['r']
+        # laplacian smoothing settings initialization
+        self.iter = config['laplacian_smoothing']['iter']
+        self.my_lambda = config['laplacian_smoothing']['lambda']
+        # local optimization settings initialization
+        self.threshold = config['optimization']['local']['threshold']
+        self.circle_sampling_time = config['optimization']['local']['circle_sampling']
+        self.circle_sampling_r = config['optimization']['local']['radius']
+        self.sigma_m = config['optimization']['local']['sigma_m']
+        self.sigma_c = config['optimization']['local']['sigma_c']
+        self.sigma_s = config['optimization']['local']['sigma_s']
+        self.rho = config['optimization']['local']['rho']
+        self.balancing_weight = config['optimization']['local']['balancing_weight']
+        self.edge_weight_limit = config['optimization']['local']['edge_weight_limit']
 
-    def pre_processing(self):
+    def image_pre_process(self):
         self.__edge_detection().__candidates_calculation().__grayscale().__vertical_gaussian().__DOG_function()
         return self
 
@@ -214,5 +230,6 @@ class LineDrawer(metaclass=Singleton):
         pass
 
     def __add_virtual_initial_point(self, coefficient):
-        return self.current_stroke[0] + (self.current_stroke[1] - self.current_stroke[0]) * coefficient
-
+        p_0 = self.current_stroke[0]
+        p_1 = self.current_stroke[1]
+        return [p_0[0] + (p_0[0] - p_1[0]) * coefficient, p_0[1] + (p_0[1] - p_1[1]) * coefficient]
