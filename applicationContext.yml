@@ -8,7 +8,7 @@ quitKey: 'q'
 ## brush
 
 brush:
-  radius: 2
+  radius: 1
   b: 0
   g: 0
   r: 0
@@ -23,6 +23,10 @@ laplacian_smoothing:
 
 optimization:
   local:
-    threshold: 0.2
+    threshold: 0.05
     circle_sampling: 100
-    radius: 15
+    radius: 5
+    sigma_m: 0.5 # 0.5 to 2.0
+    sigma_c: 1 # 1 to 3
+    sigma_s: 1.6 # 1.6x of sigma_c
+    rho: 0.5 # 0.5 to 2.0

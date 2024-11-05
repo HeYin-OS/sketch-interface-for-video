@@ -1,4 +1,4 @@
-import cv2 as cv
+import cv2
 from utils.yamlReader import read_yaml
 import line_drawer
 
@@ -18,17 +18,17 @@ def main():
                                     cfg['optimization']['local']['circle_sampling'],
                                     cfg['optimization']['local']['radius'])
     cfg_test_file = cfg['testFile']
-    image = cv.imread(cfg_test_file)
+    image = cv2.imread(cfg_test_file)
     if image is None:
         print("No image")
         exit(4)
     drawer.bind_image(image).bind_window(cfg['windowName']).pre_processing()
-    cv.imshow(cfg['windowName'], image)
-    cv.setMouseCallback("%s" % cfg['windowName'], drawer.draw_line)
+    cv2.imshow(cfg['windowName'], image)
+    cv2.setMouseCallback("%s" % cfg['windowName'], drawer.draw_line)
     while True:
-        if cv.waitKey(1) & 0xFF == ord(cfg['quitKey']):
+        if cv2.waitKey(1) & 0xFF == ord(cfg['quitKey']):
             break
-    cv.destroyAllWindows()
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
