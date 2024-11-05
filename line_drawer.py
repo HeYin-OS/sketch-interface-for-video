@@ -9,7 +9,6 @@ import scipy.ndimage as ndimage
 from filter_response import FilterResponse
 from test_func import test_img_show
 
-
 class LineDrawer(metaclass=Singleton):
     is_LM_holding = False
 
@@ -22,7 +21,6 @@ class LineDrawer(metaclass=Singleton):
     img_dog = None
 
     windowName = None
-
     iter = 0
     radius = 0
     b, g, r = 0.0, 0.0, 0.0
