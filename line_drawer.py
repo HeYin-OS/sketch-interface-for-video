@@ -3,8 +3,8 @@ import numpy
 import numpy as np
 import copy
 from pypattyrn.creational.singleton import Singleton
-import scipy.ndimage as ndimage
 import utils.yaml_reader as yr
+import utils.image_process as ip
 from filter_response import FilterResponse
 from test_func import test_img_show
 
@@ -106,8 +106,8 @@ class LineDrawer(metaclass=Singleton):
                      [self.b, self.g, self.r], self.radius, lineType=cv2.LINE_AA, shift=0)
 
     def setup(self):
-        cv2.imshow(self.windowName, self.img_work_on)
-        cv2.setMouseCallback("%s" % self.windowName, self.draw_line)
+        cv2.imshow(self.windowName, self.img_work_on)  # show the window first time
+        cv2.setMouseCallback("%s" % self.windowName, self.draw_line)  # bind to cv2 mouse event
 
     def read_yaml_file(self):
         config = yr.read_yaml()
@@ -140,20 +140,14 @@ class LineDrawer(metaclass=Singleton):
         self.edge_weight_limit = config['optimization']['local']['edge_weight_limit']
 
     def image_pre_process(self):
-        self.__edge_detection().__candidates_calculation().__grayscale().__vertical_gaussian().__DOG_function()
+        self.img_edge_detection = ip.detect_edge(self.img_origin, self.threshold)
+        self.candidates_calculation()
+        self.img_grayscale = ip.grayscale(self.img_origin)
+        self.img_v_gaussian = ip.vertical_gaussian(self.img_grayscale, self.sigma_m)
+        self.img_dog = ip.DOG_function(self.img_grayscale, self.sigma_c, self.sigma_s, self.rho)
         return self
 
-    def __edge_detection(self):
-        gray_img = cv2.cvtColor(self.img_work_on, cv2.COLOR_BGR2GRAY)
-        grad_x = cv2.Sobel(gray_img, cv2.CV_64F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray_img, cv2.CV_64F, 0, 1, ksize=3)
-        gradient_magnitude = np.sqrt(grad_x ** 2 + grad_y ** 2)
-        normalized_gradient = cv2.normalize(gradient_magnitude, None, 0, 1, cv2.NORM_MINMAX)
-        _, threshold_gradient = cv2.threshold(normalized_gradient, self.threshold, 1.0, cv2.THRESH_TOZERO)
-        self.img_edge_detection = threshold_gradient
-        return self
-
-    def __candidates_calculation(self):
+    def candidates_calculation(self):
         kernel = np.ones((3, 3), np.float64)
         max_filtered = cv2.dilate(self.img_edge_detection, kernel)
         coordinate_bool_map = (max_filtered == self.img_edge_detection) & (self.img_edge_detection != 0.0)
@@ -161,46 +155,23 @@ class LineDrawer(metaclass=Singleton):
         self.maximal_points_container = np.argwhere(coordinate_bool_map)
         return self
 
-    def __grayscale(self):
-        self.img_grayscale = cv2.cvtColor(self.img_origin, cv2.COLOR_BGR2GRAY)
-        return self
-
-    def __vertical_gaussian(self):
-        self.img_v_gaussian = ndimage.gaussian_filter1d(self.img_origin, sigma=self.sigma_m, axis=0)
-        return self
-
-    def __DOG_function(self):
-        gaussian1 = ndimage.gaussian_filter1d(self.img_v_gaussian, sigma=self.sigma_c)
-        gaussian2 = ndimage.gaussian_filter1d(self.img_v_gaussian, sigma=self.sigma_s)
-        self.img_dog = gaussian1 - self.rho * gaussian2
-        return self
-
     def pick_up_candidates(self):
-        # max_y, max_x = self.img_work_on.shape[:2]
-        # p_v_i_x = np.random.randint(0, max_x)
-        # p_v_i_y = np.random.randint(0, max_y)
-        # self.candidates_container.append([p_v_i_x, p_v_i_y])  # extend the point along the initial line
-        #
-        # for point in self.sampling_point_coordinate_container:
-        #     temp_points_container = []
-        #     for i in range(0, self.circle_sampling_time):
-        #         r = self.circle_sampling_r * np.sqrt(random.random())
-        #         theta = random.random() * 2 * np.pi
-        #         temp_point = [int(point[0] + r * np.cos(theta)), int(point[1] + r * np.sin(theta))]
-        #         temp_points_container.append(temp_point)
-        #     self.candidates_container.append(temp_points_container)
+        # virtual point addition
         v_i_point = self.__add_virtual_initial_point(0.5)
         self.candidates_container = []
-        self.candidates_container.append(v_i_point)  # add virtual initial point
-
-        for i in self.current_stroke:  # build the candidates set of the current stroke
+        self.candidates_container.append(v_i_point)
+        # build the candidates set of the current stroke
+        for i in self.current_stroke:
             temp_group = []
             for j in self.maximal_points_container:
                 v = [i[0] - j[0], i[1] - j[1]]
                 if np.linalg.norm(v) < self.circle_sampling_r:
                     temp_group.append(j)
             self.candidates_container.append(temp_group)
-        # calculate the filter response
+        self.edge_weight_calculation()
+        return self
+
+    def edge_weight_calculation(self):
         self.H_response = []
         for i in range(len(self.candidates_container) - 1):  # from 1st to 2nd of the last
             for p_1 in self.candidates_container[i]:  # index of start = i
@@ -213,21 +184,21 @@ class LineDrawer(metaclass=Singleton):
                     u = [-v[1], v[0]]  # u is perpendicular to v
                     height, width = self.img_grayscale.shape[:2]
                     h = 0.0
-                    # filter response integral
+                    # filter response integral H
                     for y in range(height):
                         for x in range(width):
                             new_coordinate = [int(m[0] + x * u[0] + y * v[0]), int(m[1] + x * u[1] + y * v[1])]
-                            gray_value = self.img_grayscale[new_coordinate[0], new_coordinate[1]]
+                            gray_value = 0.0
+                            if new_coordinate[0] in range(height) and new_coordinate[1] in range(width):
+                                gray_value = self.img_grayscale[new_coordinate[0], new_coordinate[1]]
                             h += self.img_v_gaussian[x][y] * gray_value * self.img_dog[x][y]
-                    # convert h into an edge weight
+                    # from H to new H
                     if h < 0:
                         h = 1 + numpy.tanh(h)
                     else:
                         h = 1
                     temp_h = FilterResponse(copy.deepcopy(p_1), copy.deepcopy(p_2), h, i)
                     self.H_response.append(temp_h)
-
-        pass
 
     def __add_virtual_initial_point(self, coefficient):
         p_0 = self.current_stroke[0]
