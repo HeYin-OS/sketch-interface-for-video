@@ -116,7 +116,7 @@ class LineDrawer(metaclass=Singleton):
     def local_optimization(self):
         ## self.laplacian_smoothing()
         self.pick_up_candidates()
-        pass
+        return self
 
     def semi_global_optimization(self):
         pass
@@ -171,8 +171,8 @@ class LineDrawer(metaclass=Singleton):
         return self
 
     def pick_up_candidates(self):
-        if len(self.current_stroke) == 0:  # mouse down and up without doing anything
-            return
+        if len(self.current_stroke) <= 1:  # mouse down and up without doing anything
+            return self
         v_i_point = self.__add_virtual_initial_point(0.5)  # virtual point addition
         self.current_candidate = []
         self.current_candidate.append([CandidatePoint(coordinate=v_i_point)])
@@ -208,7 +208,7 @@ class LineDrawer(metaclass=Singleton):
                     if modulus == 0:
                         modulus = 0.000000000001
                     v = (q_2.ccoordinate - q_1.ccoordinate) / modulus  # unit directed vector of p1 p2
-                    u = [-v[1], v[0]]  # u is perpendicular to v
+                    u = np.array([-v[1], v[0]])  # u is perpendicular to v
                     height, width = self.img_grayscale.shape[:2]
                     # filter response integral H
                     h = 0.0
@@ -224,7 +224,7 @@ class LineDrawer(metaclass=Singleton):
                         h = 1.0 + numpy.tanh(h)
                     else:
                         h = 1.0
-                    # total edge weight function We
+                    # total edge weight function
                     p_1 = q_1.ccoordinate
                     p_2 = self.current_stroke[0]
                     if i != 0:
@@ -232,9 +232,9 @@ class LineDrawer(metaclass=Singleton):
                         p_2 = self.current_stroke[i]
                     we = np.linalg.norm((p_1 - p_2) - (q_2.ccoordinate - q_1.ccoordinate))**2 + self.balancing_weight * h
                     if i == 0:
-                        self.current_candidate[0][0].next_weights_list.append(we)  # in the 0th point of 0th group, update the weight
+                        self.current_candidate[0][0].next_weight_list.append(we)  # in the 0th point of 0th group, update the weight
                     else:
-                        self.current_candidate[i][j].next_weights_list.append(we)  # in the jth point of ith group, update the weight
+                        self.current_candidate[i][j].next_weight_list.append(we)  # in the jth point of ith group, update the weight
                     pass
 
     def __add_virtual_initial_point(self, coefficient):
