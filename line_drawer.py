@@ -116,7 +116,7 @@ class LineDrawer(metaclass=Singleton):
     def local_optimization(self):
         ## self.laplacian_smoothing()
         self.pick_up_candidates()
-        pass
+        return self
 
     def semi_global_optimization(self):
         pass
@@ -171,8 +171,8 @@ class LineDrawer(metaclass=Singleton):
         return self
 
     def pick_up_candidates(self):
-        if len(self.current_stroke) == 0:  # mouse down and up without doing anything
-            return
+        if len(self.current_stroke) <= 1:  # mouse down and up without doing anything
+            return self
         v_i_point = self.__add_virtual_initial_point(0.5)  # virtual point addition
         self.current_candidate = []
         self.current_candidate.append([CandidatePoint(coordinate=v_i_point)])
