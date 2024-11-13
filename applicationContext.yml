@@ -2,7 +2,7 @@
 ## main setting
 
 windowName: 'draw_pad'
-testFile: 'image/tower.jpg'
+testFile: 'image/cat.jpg'
 quitKey: 'q'
 
 ## brush
