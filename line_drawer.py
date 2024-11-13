@@ -194,7 +194,7 @@ class LineDrawer(metaclass=Singleton):
         ##
         ## test area
         ##
-        ## self.edge_weight_calculation()
+        self.edge_weight_calculation()
         return self
 
     def edge_weight_calculation(self):
@@ -203,11 +203,11 @@ class LineDrawer(metaclass=Singleton):
             for q_1 in self.current_candidate[i]:  # q_start
                 j += 1
                 for q_2 in self.current_candidate[i + 1]:  # q_end
-                    m = (q_1.ccoordinate + q_2.ccoordinate) / 2  # m is the midden point
-                    modulus = np.linalg.norm(q_2.ccoordinate - q_1.ccoordinate)  # length of vec
+                    m = (q_1.coordinate + q_2.coordinate) / 2  # m is the midden point
+                    modulus = np.linalg.norm(q_2.coordinate - q_1.coordinate)  # length of vec
                     if modulus == 0:
-                        modulus = 0.000000000001
-                    v = (q_2.ccoordinate - q_1.ccoordinate) / modulus  # unit directed vector of p1 p2
+                        modulus = 0.00001
+                    v = (q_2.coordinate - q_1.coordinate) / modulus  # unit directed vector of p1 p2
                     u = np.array([-v[1], v[0]])  # u is perpendicular to v
                     height, width = self.img_grayscale.shape[:2]
                     # filter response integral H
@@ -216,21 +216,21 @@ class LineDrawer(metaclass=Singleton):
                         for x in range(width):
                             new_coordinate = np.array([int(m[0] + x * u[0] + y * v[0]), int(m[1] + x * u[1] + y * v[1])])
                             gray_value = 0.0
-                            if new_coordinate[0] in range(height) and new_coordinate[1] in range(width):
-                                gray_value = self.img_grayscale[new_coordinate[0], new_coordinate[1]]
-                            h += self.img_v_gaussian[x][y] * gray_value * self.img_dog[x][y]
+                            if new_coordinate[0] in range(width) and new_coordinate[1] in range(height):
+                                gray_value = self.img_grayscale[new_coordinate[1]][new_coordinate[0]]
+                            h += self.img_v_gaussian[y][x] * gray_value * self.img_dog[y][x]
                     # from H to H~
                     if h < 0.0:
                         h = 1.0 + numpy.tanh(h)
                     else:
                         h = 1.0
                     # total edge weight function
-                    p_1 = q_1.ccoordinate
+                    p_1 = q_1.coordinate
                     p_2 = self.current_stroke[0]
                     if i != 0:
                         p_1 = self.current_stroke[i - 1]
                         p_2 = self.current_stroke[i]
-                    we = np.linalg.norm((p_1 - p_2) - (q_2.ccoordinate - q_1.ccoordinate))**2 + self.balancing_weight * h
+                    we = np.linalg.norm((p_1 - p_2) - (q_2.coordinate - q_1.coordinate))**2 + self.balancing_weight * h
                     if i == 0:
                         self.current_candidate[0][0].next_weight_list.append(we)  # in the 0th point of 0th group, update the weight
                     else:
