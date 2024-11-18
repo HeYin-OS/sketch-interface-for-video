@@ -26,10 +26,10 @@ optimization:
     threshold: 0.05 # edge detection
     num_of_candidate: 4 # number of each stroke
     circle_sampling: 100 # limitation of times of picking candidates
-    radius: 5 # r of picking candidates for every stroke points
+    radius: 15 # r of picking candidates for every stroke points
     sigma_m: 0.5 # 0.5 to 2.0 || for gaussian enhance
-    sigma_c: 1 # 1 to 3 || for DOG gaussian func 1
+    sigma_c: 1.0 # 1 to 3 || for DOG gaussian func 1
     sigma_s: 1.6 # 1.6x of sigma_c || for DOG gaussian func 2
-    rho: 0.5 # 0.5 to 2.0 || coefficient of DOG gaussian func 2
+    rho: 0.97 # 0.5 to 2.0 || coefficient of DOG gaussian func 2
     balancing_weight: 0.5 # weight of filter response
     edge_weight_limit: 0.07 # limit of edge weight
