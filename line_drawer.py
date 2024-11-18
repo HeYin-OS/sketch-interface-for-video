@@ -1,6 +1,6 @@
 import cv2
-import numpy
 import numpy as np
+import scipy
 from pypattyrn.creational.singleton import Singleton
 import utils.yaml_reader as yr
 import utils.image_process as ip
@@ -12,13 +12,13 @@ class LineDrawer(metaclass=Singleton):
     quit_key: str = None
     is_LM_holding: bool = False
 
-    img_origin: numpy.ndarray = None
-    img_grayscale: numpy.ndarray = None
-    img_work_on: numpy.ndarray = None
-    img_save_point: numpy.ndarray = None
-    img_edge_detection: numpy.ndarray = None
-    img_v_gaussian: numpy.ndarray = None
-    img_dog: numpy.ndarray = None
+    img_origin: np.ndarray = None
+    img_grayscale: np.ndarray = None
+    img_work_on: np.ndarray = None
+    img_save_point: np.ndarray = None
+    img_edge_detection: np.ndarray = None
+    img_v_gaussian: np.ndarray = None
+    img_dog: np.ndarray = None
 
     windowName: str = None
     iter: int = 0
@@ -34,7 +34,8 @@ class LineDrawer(metaclass=Singleton):
 
     current_stroke: list = []
     all_strokes: list = []
-    maximal_points_container: numpy.ndarray = None  # [Pre-calculation] all salient points with maximal gradient magnitude in the image
+    candidates: np.ndarray = None  # [Pre-calculation] all salient points with maximal gradient magnitude in the image
+    candidates_kd_tree = None  # kd_tree of all candidates
     current_candidate: list = []  # candidates or candidate groups of current stroke
     all_candidates: list = []  # candidates or candidate groups of all strokes
 
@@ -115,7 +116,7 @@ class LineDrawer(metaclass=Singleton):
 
     def local_optimization(self):
         ## self.laplacian_smoothing()
-        self.pick_up_candidates()
+        self.search_candidates()
         return self
 
     def semi_global_optimization(self):
@@ -156,10 +157,14 @@ class LineDrawer(metaclass=Singleton):
 
     def image_pre_process(self):
         self.img_edge_detection = ip.detect_edge(self.img_origin, self.threshold)
+        # test_img_show("edge_detection", self.img_edge_detection)
         self.candidates_calculation()
         self.img_grayscale = ip.grayscale(self.img_origin)
+        # test_img_show("grayscale", self.img_grayscale)
         self.img_v_gaussian = ip.vertical_gaussian(self.img_grayscale, self.sigma_m)
+        # test_img_show("vertical_gaussian", self.img_v_gaussian)
         self.img_dog = ip.DOG_function(self.img_grayscale, self.sigma_c, self.sigma_s, self.rho)
+        # test_img_show("dog_function", self.img_dog)
         return self
 
     def candidates_calculation(self):
@@ -167,22 +172,32 @@ class LineDrawer(metaclass=Singleton):
         max_filtered = cv2.dilate(self.img_edge_detection, kernel)
         coordinate_bool_map = (max_filtered == self.img_edge_detection) & (self.img_edge_detection != 0.0)
         test_img_show("all candidates", coordinate_bool_map.astype(np.uint8) * 255)
-        self.maximal_points_container = np.argwhere(coordinate_bool_map)
+        self.candidates = np.argwhere(coordinate_bool_map)
+        self.candidates_kd_tree = scipy.spatial.cKDTree(self.candidates)
         return self
 
-    def pick_up_candidates(self):
+    def search_candidates(self):
         if len(self.current_stroke) <= 1:  # mouse down and up without doing anything
             return self
         v_i_point = self.__add_virtual_initial_point(0.5)  # virtual point addition
         self.current_candidate = []
         self.current_candidate.append([CandidatePoint(coordinate=v_i_point)])
-        # build the candidates set of the current stroke
+        # search the candidate points of current points
+        k = 0
         for stroke_point in self.current_stroke:
             temp_group = []
-            for candidate_point in self.maximal_points_container:
-                if np.linalg.norm(stroke_point - candidate_point) < self.circle_sampling_r:
-                    temp_group.append(CandidatePoint(coordinate=candidate_point))
+            indices = self.candidates_kd_tree.query_ball_point(stroke_point, self.circle_sampling_r, p=2.0, workers=-1)
+            for i in indices:
+                temp_group.append(CandidatePoint(coordinate=self.candidates[i]))
             self.current_candidate.append(temp_group)
+            k += 1
+            print(f"Stroke Point No.{k} has {len(temp_group)} candidates.")
+        # for stroke_point in self.current_stroke:
+        #     temp_group = []
+        #     for candidate_point in self.candidates:
+        #         if np.linalg.norm(stroke_point - candidate_point) < self.circle_sampling_r:
+        #             temp_group.append(CandidatePoint(coordinate=candidate_point))
+        #     self.current_candidate.append(temp_group)
         ##
         ## test area
         ##
@@ -194,7 +209,7 @@ class LineDrawer(metaclass=Singleton):
         ##
         ## test area
         ##
-        self.edge_weight_calculation()
+        # self.edge_weight_calculation()
         return self
 
     def edge_weight_calculation(self):
@@ -221,7 +236,7 @@ class LineDrawer(metaclass=Singleton):
                             h += self.img_v_gaussian[y][x] * gray_value * self.img_dog[y][x]
                     # from H to H~
                     if h < 0.0:
-                        h = 1.0 + numpy.tanh(h)
+                        h = 1.0 + np.tanh(h)
                     else:
                         h = 1.0
                     # total edge weight function
@@ -230,7 +245,7 @@ class LineDrawer(metaclass=Singleton):
                     if i != 0:
                         p_1 = self.current_stroke[i - 1]
                         p_2 = self.current_stroke[i]
-                    we = np.linalg.norm((p_1 - p_2) - (q_2.coordinate - q_1.coordinate))**2 + self.balancing_weight * h
+                    we = np.linalg.norm((p_1 - p_2) - (q_2.coordinate - q_1.coordinate)) ** 2 + self.balancing_weight * h
                     if i == 0:
                         self.current_candidate[0][0].next_weight_list.append(we)  # in the 0th point of 0th group, update the weight
                     else:
