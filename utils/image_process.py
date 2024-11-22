@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from scipy import ndimage
+from PIL import Image
 
 
 def detect_edge(img, threshold):
@@ -48,4 +48,44 @@ def trim_image(img, middle_point, width, height):
     return new_img
 
 
+def getDpi(imgUrl):
+    img = Image.open(imgUrl)
+    dpi = img.info.get('dpi', (96, 96))
+    return dpi
 
+
+def mm_to_pixels(mm, imgUrl):
+    inches = mm / 25.4
+    dpi = getDpi(imgUrl)
+    pixel_length = dpi[0] * inches
+    return pixel_length
+
+
+def get_total_edge_weight(img_grayscale, x_limit, y_limit, dog_kernel, gaussian_kernel, rs, a, p1, p2, q1, q2):
+    # use affine transformation
+    m = (q1 + q2) / 2
+    modulus = np.linalg.norm(q2 - q1)
+    if modulus == 0:
+        modulus = 0.00001
+    v = (q2 - q1) / modulus  # unit directed vector of p1-p2
+    u = np.array([-v[1], v[0]])  # u is perpendicular to v
+    affine = np.array([[u[0], v[0], m[0]],
+                       [u[1], v[1], m[1]]], dtype=np.float32)
+    rows, cols = img_grayscale.shape[:2]
+    transformed_image = cv2.warpAffine(img_grayscale, affine, (cols, rows))
+    # filter response integral H, use the convolution.
+    int_m = np.array(m, dtype=np.int32)
+    x_padding = dog_kernel.shape[1] >> 1
+    y_padding = gaussian_kernel.shape[1] >> 1
+    trimmed_image = trim_image(transformed_image, int_m, x_padding * 2 + x_limit, y_padding * 2 + y_limit)
+    conv_x = cv2.filter2D(trimmed_image, -1, dog_kernel)
+    conv = cv2.filter2D(conv_x, -1, gaussian_kernel)
+    h = np.sum(conv)
+    # from H to H~
+    if h < 0.0:
+        h = 1.0 + np.tanh(h)
+    else:
+        h = 1.0
+    # total edge weight function
+    we = np.linalg.norm((p2 - p1) - (q2 - q1)) ** 2 / rs ** 2 + a * h
+    return we

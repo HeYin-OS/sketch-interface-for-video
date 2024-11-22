@@ -1,11 +1,12 @@
 
 ## main setting
 
-windowName: 'draw_pad'
-testFile: 'image/cat.jpg'
-quitKey: 'q'
-refreshKey: 'r'
-consoleOn: false
+main_settings:
+  windowName: 'draw_pad'
+  testFile: 'image/cat.jpg'
+  quitKey: 'q'
+  refreshKey: 'r'
+  consoleOn: false
 
 ## brush
 
@@ -27,14 +28,14 @@ optimization:
   local:
     threshold: 0.05 # edge detection
     num_of_candidate: 4 # number of each stroke
-    circle_sampling: 100 # limitation of times of picking candidates
-    radius: 7.5 # r of picking candidates for every stroke points
+    candidates_limit: 100 # limits of candidates of each stroke point
+    radius: 7.5 # r of picking candidates for every stroke points, unit: millimeter
     kernel_size: 3 # the size of gaussian kernel
     sigma_m: 3.0 # 0.5 to 2.0 || for gaussian filter
     sigma_c: 1.0 # 1 to 3 || for DOG gaussian func 1
     sigma_s: 1.6 # 1.6x of sigma_c || for DOG gaussian func 2
     rho: 0.99 # 0.5 to 2.0 || coefficient of DOG gaussian func 2
-    X: 4 # range of horizontal convolution
-    Y: 7 # range of vertical convolution
+    x_limit: 4 # range of horizontal convolution
+    y_limit: 7 # range of vertical convolution
     alpha: 0.1 # weight of filter response
     edge_weight_limit: 0.07 # limit of edge weight

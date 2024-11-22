@@ -1,21 +1,21 @@
+import colorama
 import cv2
-import numpy
 import numpy as np
 import scipy
-import colorama
 from pypattyrn.creational.singleton import Singleton
-from datetime import datetime
-import utils.yaml_reader as yr
+
 import utils.image_process as ip
+import utils.logging as log
+import utils.yaml_reader as yr
 from data.candidate_point import CandidatePoint
 from test_func import test_img_show
 
 
 class LineDrawer(metaclass=Singleton):
+    windowName: str = None
     quit_key: str = None
     refresh_key: str = None
     console_on: bool = None
-    is_LM_holding: bool = False
 
     img_origin: np.ndarray = None
     img_grayscale: np.ndarray = None
@@ -25,7 +25,6 @@ class LineDrawer(metaclass=Singleton):
     gaussian_kernel_y1d: np.ndarray = None
     dog_kernel_x1d: np.ndarray = None
 
-    windowName: str = None
     iter: int = 0
     radius: int = 0
     b: float = 0.0
@@ -34,12 +33,14 @@ class LineDrawer(metaclass=Singleton):
     my_lambda: float = 0.0
     threshold: float = 0.0
 
-    circle_sampling_time: int = 0
-    circle_sampling_r: float = 0
+    picking_limit: int = 0
+    picking_radius: float = 0
 
+    is_LM_holding: bool = False
     current_stroke: list = []
     all_strokes: list = []
     candidates: np.ndarray = None  # [Pre-calculation] all salient points with maximal gradient magnitude in the image
+    weights: dict = {}
     current_candidate: list = []  # candidates or candidate groups of current stroke
     current_candidates_kd_tree = None  # kd_tree of all candidates
     all_candidates: list = []  # candidates or candidate groups of all strokes
@@ -64,15 +65,15 @@ class LineDrawer(metaclass=Singleton):
     def read_yaml_file(self):
         config = yr.read_yaml()
         # main settings initialization
-        self.windowName = config['windowName']
-        image = cv2.imread(config['testFile'])
+        self.windowName = config["main_settings"]['windowName']
+        image = cv2.imread(config["main_settings"]['testFile'])
         if image is None:
             print("No image")
             exit(4)
         self.img_origin = image
-        self.quit_key = config['quitKey']
-        self.refresh_key = config['refreshKey']
-        self.console_on = config['consoleOn']
+        self.quit_key = config["main_settings"]['quitKey']
+        self.refresh_key = config["main_settings"]['refreshKey']
+        self.console_on = config["main_settings"]['consoleOn']
         # brush settings initialization
         self.radius = config['brush']['radius']
         self.b = config['brush']['b']
@@ -83,15 +84,16 @@ class LineDrawer(metaclass=Singleton):
         self.my_lambda = config['laplacian_smoothing']['lambda']
         # local optimization settings initialization
         self.threshold = config['optimization']['local']['threshold']
-        self.circle_sampling_time = config['optimization']['local']['circle_sampling']
-        self.circle_sampling_r = config['optimization']['local']['radius']
+        self.picking_limit = config['optimization']['local']['candidates_limit']
+        mm = config['optimization']['local']['radius']
+        self.picking_radius = ip.mm_to_pixels(mm, config["main_settings"]['testFile'])
         self.kernel_size = config['optimization']['local']['kernel_size']
         self.sigma_m = config['optimization']['local']['sigma_m']
         self.sigma_c = config['optimization']['local']['sigma_c']
         self.sigma_s = config['optimization']['local']['sigma_s']
         self.rho = config['optimization']['local']['rho']
-        self.x_limit = config['optimization']['local']['X']
-        self.y_limit = config['optimization']['local']['Y']
+        self.x_limit = config['optimization']['local']['x_limit']
+        self.y_limit = config['optimization']['local']['y_limit']
         self.alpha = config['optimization']['local']['alpha']
         self.edge_weight_limit = config['optimization']['local']['edge_weight_limit']
 
@@ -100,8 +102,10 @@ class LineDrawer(metaclass=Singleton):
         self.img_work_on = self.img_origin.copy()
         self.img_save_point = self.img_origin.copy()
         self.image_pre_process().setup()
+        weights = {}
         self.current_stroke = []
         self.all_strokes = []
+        # no need for all candidates to be initialized
         # no need for kd_tree to be initialized
         self.current_candidate = []
         self.all_candidates = []
@@ -207,20 +211,35 @@ class LineDrawer(metaclass=Singleton):
             return self
         v_i_point = self.__add_virtual_initial_point(0.5)  # virtual point addition
         self.current_candidate = []
-        self.current_candidate.append([CandidatePoint(coordinate=v_i_point)])
+        self.current_candidate.append([v_i_point])
         # search the candidate points of current points
-        k = 0
         if self.console_on:
-            print(f"[{datetime.utcnow()}]{colorama.Fore.CYAN}[DEBUG]<<<<<<<<            Logging of candidate searching            >>>>>>>>")
-        for stroke_point in self.current_stroke:
+            log.printLog(0, "Logging of candidate searching", True)
+        for i in range(len(self.current_stroke)):
             temp_group = []
-            indices = self.current_candidates_kd_tree.query_ball_point(stroke_point, self.circle_sampling_r, p=2.0, workers=-1)
-            for i in indices:
-                temp_group.append(CandidatePoint(coordinate=self.candidates[i]))
+            indices = self.current_candidates_kd_tree.query_ball_point(self.current_stroke[i], self.picking_radius, p=2.0, workers=-1)
+            for j in range(len(indices)):
+                p_2 = self.current_stroke[i]
+                q_2 = self.candidates[indices[j]]
+                temp_group.append(q_2)
+                # store the weight information
+                if i == 0:
+                    p_1 = v_i_point
+                    q_1 = v_i_point
+                    we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
+                                                  self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
+                    self.weights[(0, 0, j)] = we
+                else:
+                    for k in range(len(self.current_candidate[i])):
+                        p_1 = self.current_stroke[i - 1]
+                        q_1 = self.current_candidate[i][k]
+                        we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
+                                                      self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
+                        self.weights[(i, k, j)] = we
             self.current_candidate.append(temp_group)
-            k += 1
             if self.console_on:
-                print(f"[{datetime.utcnow()}]Stroke Point No.{k} has {len(temp_group)} candidate(s).")
+                log.printLog(0, f"Stroke Point No.{i} has {len(temp_group)} candidate(s).", False)
+        print(self.weights)
         # for stroke_point in self.current_stroke:
         #     temp_group = []
         #     for candidate_point in self.candidates:
@@ -230,53 +249,28 @@ class LineDrawer(metaclass=Singleton):
         temp_img = np.zeros(self.img_work_on.shape[:2], dtype=np.uint8)
         for group in self.current_candidate:
             for candidate_point in group:
-                temp_img[*candidate_point.coordinate] = 255
+                temp_img[*candidate_point] = 255
         test_img_show("candidates of current stroke", temp_img)
         # self.edge_weight_calculation()
         return self
 
     def edge_weight_calculation(self):
-        for i in range(len(self.current_candidate) - 1):  # from 1st to 2nd of the last
-            j = -1
-            for q_1 in self.current_candidate[i]:  # q_start
-                j += 1
-                for q_2 in self.current_candidate[i + 1]:  # q_end
-                    # use affine transformation
-                    m = (q_1.coordinate + q_2.coordinate) / 2
-                    modulus = np.linalg.norm(q_2.coordinate - q_1.coordinate)
-                    if modulus == 0:
-                        modulus = 0.00001
-                    v = (q_2.coordinate - q_1.coordinate) / modulus  # unit directed vector of p1-p2
-                    u = np.array([-v[1], v[0]])  # u is perpendicular to v
-                    affine = np.array([[u[0], v[0], m[0]],
-                                      [u[1], v[1], m[1]]], dtype=np.float32)
-                    rows, cols = self.img_origin.shape[:2]
-                    transformed_image = cv2.warpAffine(self.img_grayscale, affine, (cols, rows))
-                    # filter response integral H
-                    # use the convolution
-                    int_m = np.array(m, dtype=np.int32)
-                    padding = self.kernel_size >> 1
-                    trimmed_image = ip.trim_image(self.img_grayscale, int_m, padding * 2 + self.x_limit, padding * 2 + self.y_limit)
-                    conv_x = cv2.filter2D(trimmed_image, -1, self.gaussian_kernel_y1d)
-                    conv = cv2.filter2D(conv_x, -1, self.dog_kernel_x1d)
-                    h = numpy.sum(conv)
-                    # from H to H~
-                    if h < 0.0:
-                        h = 1.0 + np.tanh(h)
-                    else:
-                        h = 1.0
-                    # total edge weight function
-                    p_1 = q_1.coordinate
-                    p_2 = self.current_stroke[0]
-                    if i != 0:
-                        p_1 = self.current_stroke[i - 1]
-                        p_2 = self.current_stroke[i]
-                    we = np.linalg.norm((p_1 - p_2) - (q_2.coordinate - q_1.coordinate)) ** 2 + self.alpha * h
+        for i in range(len(self.current_candidate) - 1):  # from 1st one to 2nd of the last one
+            q1_list = self.current_candidate[i]
+            q2_list = self.current_candidate[i + 1]
+            for j in range(len(q1_list)):  # q_start
+                for k in range(len(q2_list)):  # q_end
+                    q1 = q1_list[j]
+                    q2 = q2_list[k]
                     if i == 0:
-                        self.current_candidate[0][0].next_weight_list.append(we)  # in the 0th point of 0th group, update the weight
+                        p_1 = q1.coordinate
                     else:
-                        self.current_candidate[i][j].next_weight_list.append(we)  # in the jth point of ith group, update the weight
-                    pass
+                        p_1 = self.current_stroke[i - 1]
+                    p_2 = self.current_stroke[i]
+                    we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
+                                                  self.picking_radius, self.alpha, p_1, p_2, q1, q2)
+                    print(we)
+        pass
 
     def __add_virtual_initial_point(self, coefficient):
         p_0 = self.current_stroke[0]
