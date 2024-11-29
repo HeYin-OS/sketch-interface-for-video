@@ -3,14 +3,15 @@ import cv2
 import numpy as np
 import scipy
 from pypattyrn.creational.singleton import Singleton
-
+import taichi as ti
+import random
+import time
 import utils.image_process as ip
-import utils.logging as log
 import utils.yaml_reader as yr
-from data.candidate_point import CandidatePoint
 from test_func import test_img_show
 
 
+@ti.data_oriented
 class LineDrawer(metaclass=Singleton):
     windowName: str = None
     quit_key: str = None
@@ -39,10 +40,10 @@ class LineDrawer(metaclass=Singleton):
     is_LM_holding: bool = False
     current_stroke: list = []
     all_strokes: list = []
-    candidates: np.ndarray = None  # [Pre-calculation] all salient points with maximal gradient magnitude in the image
-    weights: dict = {}
-    current_candidate: list = []  # candidates or candidate groups of current stroke
-    current_candidates_kd_tree = None  # kd_tree of all candidates
+    candidates: np.ndarray = None  # pre-computed all salient points in the image, # shape like: (computed-num-of-all-candidates, 2)
+    candidates_kd_tree = None  # kd_tree of all candidates, shape like: tree
+    weights: dict = {}  # used for weights storage, key like: (ith-of-1st-point, jth-in-front-point-candidates, kth-in-after-point-candidates), value like: float32 or float64 or any-float
+    current_candidate_points: np.ndarray = []  # candidate groups of current stroke, shape like: (num-of-stroke-points + 1, controlled-num-of-candidates, 2) and "+ 1" is due to the virtual point
     all_candidates: list = []  # candidates or candidate groups of all strokes
 
     kernel_size: int = 0
@@ -56,6 +57,7 @@ class LineDrawer(metaclass=Singleton):
     edge_weight_limit: float = 0.0
 
     def __init__(self):
+        ti.init(ti.gpu)
         self.read_yaml_file()
         self.img_work_on = self.img_origin.copy()
         self.img_save_point = self.img_origin.copy()
@@ -107,7 +109,7 @@ class LineDrawer(metaclass=Singleton):
         self.all_strokes = []
         # no need for all candidates to be initialized
         # no need for kd_tree to be initialized
-        self.current_candidate = []
+        self.current_candidate_points = np.array([], dtype=np.int32)
         self.all_candidates = []
 
     def setup(self):
@@ -146,7 +148,11 @@ class LineDrawer(metaclass=Singleton):
 
     def local_optimization(self):
         ## self.laplacian_smoothing()
+        self.data_conversion()
+        if not self.add_virtual_point():
+            return self
         self.search_candidates()
+        self.show_candidates_window()
         return self
 
     def semi_global_optimization(self):
@@ -157,6 +163,10 @@ class LineDrawer(metaclass=Singleton):
 
     def collect_coordinates(self, x, y):  # Don't modify the code.
         self.current_stroke.append(np.array([y, x]))
+
+    def data_conversion(self):
+        # build current candidates list structure
+        self.current_candidate_points = np.full((len(self.current_stroke) + 1, self.picking_limit, 2), -1, dtype=np.int32)
 
     def laplacian_smoothing(self):
         for _ in range(self.iter):
@@ -203,76 +213,76 @@ class LineDrawer(metaclass=Singleton):
         coordinate_bool_map = (max_filtered == self.img_edge_detection) & (self.img_edge_detection != 0.0)
         test_img_show("all candidates", coordinate_bool_map.astype(np.uint8) * 255)
         self.candidates = np.argwhere(coordinate_bool_map)
-        self.current_candidates_kd_tree = scipy.spatial.cKDTree(self.candidates)
+        self.candidates_kd_tree = scipy.spatial.cKDTree(self.candidates)
         return self
 
     def search_candidates(self):
-        if len(self.current_stroke) <= 1:  # mouse down and up without doing anything
-            return self
-        v_i_point = self.__add_virtual_initial_point(0.5)  # virtual point addition
-        self.current_candidate = []
-        self.current_candidate.append([v_i_point])
-        # search the candidate points of current points
-        if self.console_on:
-            log.printLog(0, "Logging of candidate searching", True)
-        for i in range(len(self.current_stroke)):
-            temp_group = []
-            indices = self.current_candidates_kd_tree.query_ball_point(self.current_stroke[i], self.picking_radius, p=2.0, workers=-1)
-            for j in range(len(indices)):
-                p_2 = self.current_stroke[i]
-                q_2 = self.candidates[indices[j]]
-                temp_group.append(q_2)
-                # store the weight information
-                if i == 0:
-                    p_1 = v_i_point
-                    q_1 = v_i_point
-                    we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
-                                                  self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
-                    self.weights[(0, 0, j)] = we
-                else:
-                    for k in range(len(self.current_candidate[i])):
-                        p_1 = self.current_stroke[i - 1]
-                        q_1 = self.current_candidate[i][k]
-                        we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
-                                                      self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
-                        self.weights[(i, k, j)] = we
-            self.current_candidate.append(temp_group)
-            if self.console_on:
-                log.printLog(0, f"Stroke Point No.{i} has {len(temp_group)} candidate(s).", False)
-        print(self.weights)
-        # for stroke_point in self.current_stroke:
-        #     temp_group = []
-        #     for candidate_point in self.candidates:
-        #         if np.linalg.norm(stroke_point - candidate_point) < self.circle_sampling_r:
-        #             temp_group.append(CandidatePoint(coordinate=candidate_point))
-        #     self.current_candidate.append(temp_group)
-        temp_img = np.zeros(self.img_work_on.shape[:2], dtype=np.uint8)
-        for group in self.current_candidate:
-            for candidate_point in group:
-                temp_img[*candidate_point] = 255
-        test_img_show("candidates of current stroke", temp_img)
+        # initialize taichi vector field container of stroke points
+        current_stroke_np = np.array(self.current_stroke, dtype=np.int32)
+        current_stroke_ti = ti.Vector.field(2, dtype=ti.i32, shape=len(current_stroke_np))
+        current_stroke_ti.from_numpy(current_stroke_np)
+        # initialize taichi vector field container of candidate points
+        current_candidates_ti = ti.Vector.field(2, dtype=ti.i32, shape=(1 + len(current_stroke_np), self.picking_limit))
+        for i in range(current_stroke_ti.shape[0]):
+            indices = self.candidates_kd_tree.query_ball_point(self.current_stroke[i], self.picking_radius, p=2.0, workers=-1)
+            random.shuffle(indices)
+            minimum = min(len(indices), self.picking_limit)
+            for j in range(minimum):  # all candidates point of one point
+                self.current_candidate_points[i + 1][j] = self.candidates[indices[j]]
+        current_candidates_ti.from_numpy(self.current_candidate_points)
+        # initialize taichi field container of gray scaled image
+        gray_image_ti = ti.field(dtype=ti.i32, shape=self.img_grayscale.shape)
+        gray_image_ti.from_numpy(self.img_grayscale)
+        # initialize taichi matrices of two kernels
+        gaussian_kernel_ti = ti.Matrix(self.gaussian_kernel_y1d, dt=ti.f64)
+        dog_kernel_ti = ti.Matrix(self.dog_kernel_x1d, dt=ti.f64)
+        # initialize taichi field container of weights
+        weights = ti.field(ti.f64, shape=(current_stroke_ti.shape[0], self.picking_limit, self.picking_limit))
+        weights.fill(0.0)
+        # running taichi kernel function
+        start = time.time_ns()
+        ip.traverse_every_candidates_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti, self.x_limit, self.y_limit,
+                                                     dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        print(f"{(time.time_ns() - start) / 1e9}s.")
+        # end of kernel function
+        # for i in range(len(self.current_stroke)):
+        #     # p_2 = self.current_stroke[i]
+        #     # q_2 = self.candidates[indices[j]]
+        #     temp_group.append(q_2)
+        #     for k in range(len(self.current_candidate[i])):  # calculate the weights
+        #         if i == 0:
+        #             p_1 = self.current_candidate[i][k]
+        #         else:
+        #             p_1 = self.current_stroke[i - 1]
+        #         q_1 = self.current_candidate[i][k]
+        #         we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
+        #                                       self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
+        #         self.weights[(i, k, j)] = we
+        # logging of candidates number of every stroke
+        # if self.console_on:
+        #     log.printLog(0, f"The stored weights in the dict", True)
+        #     for (i, j, k), value in self.weights.items():
+        #         log.printLog(0, f"The weight between q[{i:<2},{j:<2}] and q[{i + 1:<2},{k:<2}] is {value}.",
+        #                      False)
         # self.edge_weight_calculation()
         return self
 
-    def edge_weight_calculation(self):
-        for i in range(len(self.current_candidate) - 1):  # from 1st one to 2nd of the last one
-            q1_list = self.current_candidate[i]
-            q2_list = self.current_candidate[i + 1]
-            for j in range(len(q1_list)):  # q_start
-                for k in range(len(q2_list)):  # q_end
-                    q1 = q1_list[j]
-                    q2 = q2_list[k]
-                    if i == 0:
-                        p_1 = q1.coordinate
-                    else:
-                        p_1 = self.current_stroke[i - 1]
-                    p_2 = self.current_stroke[i]
-                    we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
-                                                  self.picking_radius, self.alpha, p_1, p_2, q1, q2)
-                    print(we)
-        pass
+    def show_candidates_window(self):
+        temp_img = np.zeros(self.img_work_on.shape[:2], dtype=np.uint8)
+        for group in self.current_candidate_points:
+            for candidate_point in group:
+                temp_img[*candidate_point] = 255
+        temp_img[-1][-1] = 0
+        test_img_show("candidates of current stroke", temp_img)
+
+    def add_virtual_point(self):
+        if len(self.current_stroke) <= 1:  # mouse down and up without doing anything
+            return False
+        v_i_point = self.__add_virtual_initial_point(0.5)  # add virtual point
+        self.current_candidate_points[0][0] = v_i_point
+        return True
 
     def __add_virtual_initial_point(self, coefficient):
         p_0 = self.current_stroke[0]
         p_1 = self.current_stroke[1]
-        return np.array([int(p_0[0] + (p_0[0] - p_1[0]) * coefficient), int(p_0[1] + (p_0[1] - p_1[1]) * coefficient)])
+        return np.array([int(p_0[0] + (p_0[0] - p_1[0]) * coefficient), int(p_0[1] + (p_0[1] - p_1[1]) * coefficient)], dtype=np.int32)

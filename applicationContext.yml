@@ -6,7 +6,7 @@ main_settings:
   testFile: 'image/cat.jpg'
   quitKey: 'q'
   refreshKey: 'r'
-  consoleOn: false
+  consoleOn: true
 
 ## brush
 
