@@ -1,5 +1,9 @@
 import cv2
+import numpy
 import numpy as np
+import taichi
+import taichi as ti
+import taichi.math as tm
 from PIL import Image
 
 
@@ -41,7 +45,8 @@ def trim_image(img, middle_point, width, height):
     start_point = np.array([middle_point[0] - (width >> 1), middle_point[1] - (height >> 1)])
     for i in range(height):
         for j in range(width):
-            if start_point[0] < 0 or start_point[1] < 0 or start_point[0] >= img.shape[1] or start_point[1] >= img.shape[0]:
+            if start_point[0] < 0 or start_point[1] < 0 or start_point[0] >= img.shape[1] or start_point[1] >= \
+                    img.shape[0]:
                 new_img[i, j] = 0
             else:
                 new_img[i, j] = img[*start_point]
@@ -87,5 +92,35 @@ def get_total_edge_weight(img_grayscale, x_limit, y_limit, dog_kernel, gaussian_
     else:
         h = 1.0
     # total edge weight function
-    we = np.linalg.norm((p2 - p1) - (q2 - q1)) ** 2 / rs ** 2 + a * h
+    we = np.linalg.norm((p2 - p1) - (q2 - q1)) ** 2 / (rs ** 2) + a * h
     return we
+
+
+@ti.kernel
+def traverse_every_candidates_and_integral_ti(points: ti.template(), candidate_points: ti.template(), gray_image: ti.template(), x_limit: ti.i32, y_limit: ti.i32,
+                                              dog_kernel: ti.types.matrix(n=3, m=1, dtype=ti.f64), gaussian_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
+                                              r: ti.f64, alpha: ti.f64, weights: ti.template()):
+    picking_limit = candidate_points.shape[1]
+    for i in range(points.shape[0]):  # for all candidate paths
+        for j in range(picking_limit):  # for all candidate points of prev stroke point
+            if candidate_points[i, j].x == -1 and candidate_points[i, j].y == -1:  # the end of candidate points
+                break
+            for k in range(picking_limit):  # for all candidates points of next stroke point
+                if candidate_points[i + 1, k].x == -1 and candidate_points[i + 1, k].y == -1:  # the end of candidate points
+                    break
+                p1 = ti.Vector([0, 0], ti.i32)  # pre-defined
+                if i == 0:
+                    p1 = candidate_points[i, j]
+                else:
+                    p1 = points[i - 1]
+                p2 = points[i]
+                q1 = candidate_points[i, j]
+                q2 = candidate_points[i + 1, k]
+                weights[i, j, k] = get_total_edge_weight_ti(p1, p2, q1, q2, gray_image, x_limit, y_limit, dog_kernel, gaussian_kernel, r, alpha)
+
+
+@ti.func
+def get_total_edge_weight_ti(p1: ti.types.vector(2, ti.i32), p2: ti.types.vector(2, ti.i32), q1: ti.types.vector(2, ti.i32),
+                             q2: ti.types.vector(2, ti.i32), gray_image: ti.template(), x_limit: ti.int32, y_limit: ti.int32,
+                             dog_kernel: ti.template(), gaussian_kernel: ti.template(), r: ti.float64, alpha: ti.float64):
+    return 0.1

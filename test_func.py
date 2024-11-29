@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 import scipy.ndimage as ndi
+import taichi as ti
+import taichi.math as tm
 
 
 def test_img_show(window_name, img):
@@ -8,19 +10,13 @@ def test_img_show(window_name, img):
 
 
 def test():
-    points_org = [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
-    points = np.array(points_org, dtype=np.float32)
-    stroke_point = [4, 5]
-    radius = 3.0
-    query_point = np.array(stroke_point, dtype=np.float32).reshape(1, -1)
-    flann_params = dict(algorithm=1, trees=5)  # KDTree
-    flann = cv2.FlannBasedMatcher(flann_params, {})
-    flann.add([points])
-    flann.train()
-    matches = flann.radiusMatch(query_point, radius**2)
-    matched_points = [points[match.trainIdx] for match_list in matches for match in match_list]
-    print("查询点：", stroke_point)
-    print("半径内的点坐标：\n", np.array(matched_points))
+    ti.init(ti.gpu)
+    vec1 = ti.Vector([2, 2])
+    print(type(vec1))
+    vec2 = tm.vec2(2, 2)
+    print(type(vec2))
+    f1 = ti.Vector.field(2, dtype=ti.f32, shape=(2, 2))
+    print(type(f1[0, 0]))
 
 
 if __name__ == '__main__':
