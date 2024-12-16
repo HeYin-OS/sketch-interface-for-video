@@ -9,6 +9,7 @@ import time
 import utils.logging as log
 import utils.image_process as ip
 import utils.yaml_reader as yr
+import utils.statistics as st
 from test_func import test_img_show
 
 
