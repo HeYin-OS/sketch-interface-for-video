@@ -241,26 +241,25 @@ class LineDrawer(metaclass=Singleton):
         weights = ti.field(ti.f64, shape=(current_stroke_ti.shape[0], self.picking_limit, self.picking_limit))
         weights.fill(0.0)  # shape: num_of_stroke_points * candidates_limit * candidates_limit
         # fields
-        window_x = (dog_kernel_ti.m >> 1) * 2 + self.x_limit * 2
-        window_y = (gaussian_kernel_ti.n >> 1) * 2 + self.y_limit * 2
-        convolution_image_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
-                                                          self.picking_limit, window_y, window_x))
-        convolution_image_field.fill(0.0)
-        dog_x = window_x - dog_kernel_ti.m + 1
-        dog_y = window_y - dog_kernel_ti.n + 1
-        dog_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
-                                                    self.picking_limit, dog_y, dog_x))
-        dog_results_field.fill(0.0)
-        gs_x = dog_x - gaussian_kernel_ti.m + 1
-        gs_y = dog_y - gaussian_kernel_ti.n + 1
-        gs_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
-                                                   self.picking_limit, gs_y, gs_x))
-        gs_results_field.fill(0.0)
+        # window_x = (dog_kernel_ti.m >> 1) * 2 + self.x_limit * 2 # 10
+        # window_y = (gaussian_kernel_ti.n >> 1) * 2 + self.y_limit * 2 # 16
+        # convolution_image_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+        #                                                   self.picking_limit, window_y, window_x))
+        # convolution_image_field.fill(0.0)
+        # dog_x = window_x - dog_kernel_ti.m + 1 # 8
+        # dog_y = window_y - dog_kernel_ti.n + 1 # 16
+        # dog_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+        #                                             self.picking_limit, dog_y, dog_x))
+        # dog_results_field.fill(0.0)
+        # gs_x = dog_x - gaussian_kernel_ti.m + 1 # 8
+        # gs_y = dog_y - gaussian_kernel_ti.n + 1 # 14
+        # gs_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+        #                                            self.picking_limit, gs_y, gs_x))
+        # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
         ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
-                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights,
-                                  convolution_image_field, dog_results_field, gs_results_field)
+                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
         print(f"{(time.time_ns() - start) / 1e9}s.")
         # q1 = self.current_candidate_points[1][0]
         # q2 = self.current_candidate_points[2][0]

@@ -1,7 +1,5 @@
 import cv2
-import numpy
 import numpy as np
-import taichi
 import taichi as ti
 import taichi.math as tm
 from PIL import Image
@@ -100,10 +98,7 @@ def affine_and_integral_ti(points: ti.template(),
                            dog_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
                            gaussian_kernel: ti.types.matrix(n=3, m=1, dtype=ti.f64),
                            r: ti.f64, alpha: ti.f64,
-                           weights: ti.template(),
-                           img_fld: ti.template(),
-                           dog_fld: ti.template(),
-                           gs_fld: ti.template()):
+                           weights: ti.template()):
     picking_limit = candidate_points.shape[1]
     for i in range(points.shape[0]):  # for all candidate paths
         for j in range(picking_limit):  # for all candidate points of prev stroke point
@@ -120,16 +115,15 @@ def affine_and_integral_ti(points: ti.template(),
                 p2 = points[i]
                 q1 = candidate_points[i, j]
                 q2 = candidate_points[i + 1, k]
-                affine_and_trim_ti(i, j, k, q1, q2, gray_image, img_fld)  # get the corresponding color and limit into X Y
-                convolution_ti(dog_kernel, gaussian_kernel, dog_fld, gs_fld)  #
+                img_fld = affine_and_trim_ti(q1, q2, gray_image) # get the corresponding color and limit into X Y
+                h = convolution_ti(dog_kernel, gaussian_kernel, img_fld) # convolution
+                print(h)
 
 
 @ti.func
-def affine_and_trim_ti(i: ti.i32, j: ti.i32, k: ti.i32,
-                       q1: ti.types.vector(2, ti.f64),
+def affine_and_trim_ti(q1: ti.types.vector(2, ti.f64),
                        q2: ti.types.vector(2, ti.f64),
-                       gray_image: ti.template(),
-                       img_fld: ti.template()):
+                       gray_image: ti.template()):
     # middle point
     m = (q1 + q2) / 2
     v = tm.normalize(q2 - q1)
@@ -142,28 +136,27 @@ def affine_and_trim_ti(i: ti.i32, j: ti.i32, k: ti.i32,
     affine_inverse = affine.inverse()
     # find the middle point in new coordinate system
     m_new_homo = affine @ ti.Vector([m[0], m[1], 0.0], dt=ti.f64)
-    # from the very left top point as initial loop position
-    y = img_fld.shape[3]
-    x = img_fld.shape[4]
-    start_point = ti.Vector([m_new_homo[0] - (x >> 1), m_new_homo[1] - (y >> 1)], dt=ti.i32)
-    for ki in range(y):
-        for kj in range(x):
+    # get the size from param box and from the very left top point as initial loop position
+    img_trim = ti.Matrix.zero(ti.f64, 16, 10)
+    start_point = ti.Vector([m_new_homo[0] - 5, m_new_homo[1] - 8], dt=ti.i32)
+    for ki in range(16):
+        for kj in range(10):
             # use inverse affine matrix to find the original coordinate
             org_coord = affine_inverse @ ti.Vector([start_point.x + kj, start_point.y + ki, 0.0], dt=ti.f64)
             # whether the point is in the range of picture
             if 0 <= ti.i32(org_coord.x) < gray_image.shape[1] and 0 <= ti.i32(org_coord.y) < gray_image.shape[0]:
-                img_fld[i, j, k, ki, kj] = gray_image[ti.i32(org_coord.y), ti.i32(org_coord.x)]
+                img_trim[ki, kj] = gray_image[ti.i32(org_coord.y), ti.i32(org_coord.x)]
             else:
-                img_fld[i, j, k, ki, kj] = 0.0
+                img_trim[ki, kj] = 0.0
+    return img_trim
 
 
 @ti.func
-def convolution_ti(i: ti.i32, j: ti.i32, k: ti.i32,
-                   dog_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
+def convolution_ti(dog_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
                    gaussian_kernel: ti.types.matrix(n=3, m=1, dtype=ti.f64),
-                   dog_fld: ti.template(),
-                   gs_fld: ti.template()):
-    pass
+                   img_fld: ti.template()):
+
+    return ti.f64(0.0)
 
 # @ti.func
 # def get_total_edge_weight_ti(p1: ti.types.vector(2, ti.f64), p2: ti.types.vector(2, ti.f64), q1: ti.types.vector(2, ti.f64),
