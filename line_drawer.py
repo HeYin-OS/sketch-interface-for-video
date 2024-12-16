@@ -259,8 +259,8 @@ class LineDrawer(metaclass=Singleton):
         # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
-        ip.affine_and_integral_ti_new(current_stroke_ti, current_candidates_ti, gray_image_ti,
-                                      dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
         print(f"{(time.time_ns() - start) / 1e9}s.")
         # q1 = self.current_candidate_points[1][0]
         # q2 = self.current_candidate_points[2][0]
