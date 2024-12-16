@@ -6,6 +6,7 @@ from pypattyrn.creational.singleton import Singleton
 import taichi as ti
 import random
 import time
+import utils.logging as log
 import utils.image_process as ip
 import utils.yaml_reader as yr
 from test_func import test_img_show
@@ -107,8 +108,8 @@ class LineDrawer(metaclass=Singleton):
         weights = {}
         self.current_stroke = []
         self.all_strokes = []
-        # no need for all candidates to be initialized
-        # no need for kd_tree to be initialized
+        # no need for all candidates to be re-initialized
+        # no need for kd_tree to be re-initialized
         self.current_candidate_points = np.array([], dtype=np.int32)
         self.all_candidates = []
 
@@ -201,7 +202,7 @@ class LineDrawer(metaclass=Singleton):
         self.candidates_calculation()
         self.img_grayscale = ip.grayscale(self.img_origin)
         # test_img_show("grayscale", self.img_grayscale)
-        self.gaussian_kernel_y1d = ip.create_gaussian_kernel(self.kernel_size, self.sigma_m, 1)
+        self.gaussian_kernel_y1d = ip.create_gaussian_kernel(self.kernel_size, self.sigma_m, 0)
         # test_img_show("vertical_gaussian", self.img_v_gaussian)
         self.dog_kernel_x1d = ip.create_dog_kernel(self.kernel_size, self.sigma_c, self.sigma_s, self.rho, 1)
         # test_img_show("dog_function", self.img_dog)
@@ -219,8 +220,8 @@ class LineDrawer(metaclass=Singleton):
     def search_candidates(self):
         # initialize taichi vector field container of stroke points
         current_stroke_np = np.array(self.current_stroke, dtype=np.int32)
-        current_stroke_ti = ti.Vector.field(2, dtype=ti.i32, shape=len(current_stroke_np))
-        current_stroke_ti.from_numpy(current_stroke_np)
+        current_stroke_ti = ti.Vector.field(2, dtype=ti.f64, shape=len(current_stroke_np))
+        current_stroke_ti.from_numpy(current_stroke_np)  # shape: 2 * num_of_stroke_points
         # initialize taichi vector field container of candidate points
         current_candidates_ti = ti.Vector.field(2, dtype=ti.i32, shape=(1 + len(current_stroke_np), self.picking_limit))
         for i in range(current_stroke_ti.shape[0]):
@@ -229,22 +230,51 @@ class LineDrawer(metaclass=Singleton):
             minimum = min(len(indices), self.picking_limit)
             for j in range(minimum):  # all candidates point of one point
                 self.current_candidate_points[i + 1][j] = self.candidates[indices[j]]
-        current_candidates_ti.from_numpy(self.current_candidate_points)
+        current_candidates_ti.from_numpy(self.current_candidate_points)  # shape: 2 * (num_of_stroke_points + 1) * candidates_limit
         # initialize taichi field container of gray scaled image
         gray_image_ti = ti.field(dtype=ti.i32, shape=self.img_grayscale.shape)
-        gray_image_ti.from_numpy(self.img_grayscale)
+        gray_image_ti.from_numpy(self.img_grayscale)  # shape: image size
         # initialize taichi matrices of two kernels
-        gaussian_kernel_ti = ti.Matrix(self.gaussian_kernel_y1d, dt=ti.f64)
-        dog_kernel_ti = ti.Matrix(self.dog_kernel_x1d, dt=ti.f64)
+        gaussian_kernel_ti = ti.Matrix(self.gaussian_kernel_y1d, dt=ti.f64)  # shape: 3 * 1
+        dog_kernel_ti = ti.Matrix(self.dog_kernel_x1d, dt=ti.f64)  # shape: 1 * 3
         # initialize taichi field container of weights
         weights = ti.field(ti.f64, shape=(current_stroke_ti.shape[0], self.picking_limit, self.picking_limit))
-        weights.fill(0.0)
+        weights.fill(0.0)  # shape: num_of_stroke_points * candidates_limit * candidates_limit
+        # fields
+        window_x = (dog_kernel_ti.m >> 1) * 2 + self.x_limit * 2
+        window_y = (gaussian_kernel_ti.n >> 1) * 2 + self.y_limit * 2
+        convolution_image_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+                                                          self.picking_limit, window_y, window_x))
+        convolution_image_field.fill(0.0)
+        dog_x = window_x - dog_kernel_ti.m + 1
+        dog_y = window_y - dog_kernel_ti.n + 1
+        dog_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+                                                    self.picking_limit, dog_y, dog_x))
+        dog_results_field.fill(0.0)
+        gs_x = dog_x - gaussian_kernel_ti.m + 1
+        gs_y = dog_y - gaussian_kernel_ti.n + 1
+        gs_results_field = ti.field(ti.f64, shape=(len(current_stroke_np), self.picking_limit,
+                                                   self.picking_limit, gs_y, gs_x))
+        gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
-        ip.traverse_every_candidates_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti, self.x_limit, self.y_limit,
-                                                     dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights,
+                                  convolution_image_field, dog_results_field, gs_results_field)
         print(f"{(time.time_ns() - start) / 1e9}s.")
-        # end of kernel function
+        # q1 = self.current_candidate_points[1][0]
+        # q2 = self.current_candidate_points[2][0]
+        # m = (q1 + q2) / 2
+        # modulus = np.linalg.norm(q2 - q1)
+        # if modulus == 0:
+        #     modulus = 0.00001
+        # v = (q2 - q1) / modulus  # unit directed vector of p1-p2
+        # u = np.array([-v[1], v[0]])  # u is perpendicular to v
+        # affine = np.array([[u[0], v[0], m[0]], [u[1], v[1], m[1]]], dtype=np.float32)
+        # rows, cols = self.img_grayscale.shape[:2]
+        # transformed_image = cv2.warpAffine(self.img_grayscale, affine, (cols, rows))
+        # test_img_show("affine", transformed_image)
+        # #  end of kernel function
         # for i in range(len(self.current_stroke)):
         #     # p_2 = self.current_stroke[i]
         #     # q_2 = self.candidates[indices[j]]
@@ -258,7 +288,7 @@ class LineDrawer(metaclass=Singleton):
         #         we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
         #                                       self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
         #         self.weights[(i, k, j)] = we
-        # logging of candidates number of every stroke
+        # #  logging of candidates number of every stroke
         # if self.console_on:
         #     log.printLog(0, f"The stored weights in the dict", True)
         #     for (i, j, k), value in self.weights.items():
