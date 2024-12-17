@@ -1,18 +1,18 @@
+import random
+import time
 from typing import Callable
 
 import colorama
 import cv2
 import numpy as np
 import scipy
-from pypattyrn.creational.singleton import Singleton
 import taichi as ti
-import random
-import time
-import cProfile
-import utils.logging as log
+from pypattyrn.creational.singleton import Singleton
+
 import utils.image_process as ip
-import utils.yaml_reader as yr
+import utils.logging as log
 import utils.statistics as st
+import utils.yaml_reader as yr
 from test_func import test_img_show
 
 
@@ -124,7 +124,7 @@ class LineDrawer(metaclass=Singleton):
         self.img_work_on = self.img_origin.copy()
         self.img_save_point = self.img_origin.copy()
         self.image_pre_process().setup()
-        weights = {}
+        self.weights = {}
         self.current_stroke = []
         self.all_strokes = []
         # no need for all candidates to be re-initialized
@@ -252,8 +252,11 @@ class LineDrawer(metaclass=Singleton):
         # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
+        ti.sync()
         ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
                                   dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        ti.profiler.print_scoped_profiler_info()
+        ti.profiler.print_kernel_profiler_info('trace')
         log.printLog(0, f"Integral costs {(time.time_ns() - start) / 1e9}s.", False)
         st.plot_taichi_data(weights)
         return self

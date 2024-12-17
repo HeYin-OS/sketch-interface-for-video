@@ -92,8 +92,8 @@ def affine_and_integral_ti(points: ti.template(),
                 img_fld = fast_affine_and_trim_ti(q1, q2, gray_image)  # get the corresponding color and limit into X Y
                 h = fast_convolution_ti(dog_kernel, gaussian_kernel, img_fld)  # convolution
                 h = 1.0 + ti.select(h < 0.0, ti.math.tanh(h), 0.0)
-                dist = ti.math.distance(p2_p1, q2_q1)
-                weights[i, j, k] = dist * one_divide_r_squared + alpha * h  # weights
+                diff = p2_p1 - q2_q1
+                weights[i, j, k] = ti.math.dot(diff, diff) * one_divide_r_squared + alpha * h  # weights
 
 
 @ti.func
@@ -118,11 +118,11 @@ def fast_affine_and_trim_ti(q1: ti.types.vector(2, ti.f64),
     img_trim = ti.Matrix.zero(ti.f64, 16, 10)
     start_x = ti.i32(m_new_homo[0] - (img_trim.m >> 1))
     start_y = ti.i32(m_new_homo[1] - (img_trim.n >> 1))
-    for i, j in ti.ndrange(img_trim.n, img_trim.m):
+    for i, j in ti.ndrange(16, 10):
         # use inverse affine matrix to find the original coordinate
         org_coord = affine_inverse @ ti.Vector([start_x + j, start_y + i, 0.0], dt=ti.f64)
-        x = ti.i32(org_coord.x)
-        y = ti.i32(org_coord.y)
+        x = ti.i32(org_coord[0])
+        y = ti.i32(org_coord[1])
         # whether the point is in the range of picture
         valid = (x >= 0) & (x < gray_image.shape[1]) & (y >= 0) & (y < gray_image.shape[0])
         img_trim[i, j] = ti.select(valid, gray_image[y, x], 0.0)
@@ -145,6 +145,6 @@ def fast_convolution_ti(dog_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
     for i, j in ti.ndrange(gs_fld.n, gs_fld.m):
         temp = ti.f64(0.0)
         for ki, kj in ti.ndrange(3, 3):
-            temp += img_fld[i + ki, j + kj] * gaussian_kernel[ki, kj]
+            temp += dog_fld[i + ki, j + kj] * gaussian_kernel[ki, kj]
         gs_fld[i, j] = temp
     return gs_fld.sum()
