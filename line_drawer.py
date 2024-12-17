@@ -72,24 +72,6 @@ class LineDrawer(metaclass=Singleton):
         if self.console_on:
             colorama.init(autoreset=True)
 
-    def __pre_compile(self):
-        # fake data
-        fake_num = 1
-        current_stroke_ti = ti.Vector.field(2, dtype=ti.f64, shape=fake_num)
-        current_stroke_ti.fill([1.0, 1.0])
-        current_candidates_ti = ti.Vector.field(2, dtype=ti.i32, shape=(1 + fake_num, self.picking_limit))
-        current_candidates_ti.fill([0.0, 0.0])
-        gray_image_ti = ti.field(dtype=ti.i32, shape=self.img_grayscale.shape)
-        gray_image_ti.fill(0)
-        gaussian_kernel_ti = ti.Matrix(self.gaussian_kernel_y1d, dt=ti.f64)
-        dog_kernel_ti = ti.Matrix(self.dog_kernel_x1d, dt=ti.f64)
-        weights = ti.field(ti.f64, shape=(current_stroke_ti.shape[0], self.picking_limit, self.picking_limit))
-        weights.fill(0.0)
-        # compile JIT function
-        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
-                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
-        self.fast_affine_and_integral_ti = ip.affine_and_integral_ti
-
     def read_yaml_file(self):
         config = yr.read_yaml()
         # main settings initialization
@@ -153,7 +135,6 @@ class LineDrawer(metaclass=Singleton):
     def setup(self):
         cv2.imshow(self.windowName, self.img_work_on)  # show the window first time
         cv2.setMouseCallback(f"{self.windowName}", self.draw_line)  # bind to cv2 mouse event
-        self.__pre_compile()  # pre compile JIT function
 
     def draw_line(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:  # event: mouse down
@@ -271,15 +252,10 @@ class LineDrawer(metaclass=Singleton):
         # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
-        # ti.sync()
-        # ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
-        #                           dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
-        self.fast_affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
-                                         dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
-        print(repr(self.fast_affine_and_integral_ti))
-        # ti.profiler.print_kernel_profiler_info()
+        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
         log.printLog(0, f"Integral costs {(time.time_ns() - start) / 1e9}s.", False)
-        # st.plot_taichi_data(weights)
+        st.plot_taichi_data(weights)
         return self
 
     def show_candidates_window(self):
