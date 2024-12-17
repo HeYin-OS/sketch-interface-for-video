@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import taichi as ti
 import taichi.math as tm
+import cProfile
 from PIL import Image
 
 
@@ -115,7 +116,7 @@ def fast_affine_and_trim_ti(q1: ti.types.vector(2, ti.f64),
     m_new_homo = affine @ ti.Vector([m[0], m[1], 0.0], dt=ti.f64)
     # get the size from param box and from the very left top point as initial loop position
     img_trim = ti.Matrix.zero(ti.f64, 16, 10)
-    start_x = ti.i32(m_new_homo[0] - (img_trim.m >> 2))
+    start_x = ti.i32(m_new_homo[0] - (img_trim.m >> 1))
     start_y = ti.i32(m_new_homo[1] - (img_trim.n >> 1))
     for i, j in ti.ndrange(img_trim.n, img_trim.m):
         # use inverse affine matrix to find the original coordinate
