@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import taichi as ti
 import taichi.math as tm
+import cProfile
 from PIL import Image
 
 
@@ -61,36 +62,6 @@ def mm_to_pixels(mm, imgUrl):
     return pixel_length
 
 
-def get_total_edge_weight(img_grayscale, x_limit, y_limit, dog_kernel, gaussian_kernel, rs, a, p1, p2, q1, q2):
-    # use affine transformation
-    m = (q1 + q2) / 2
-    modulus = np.linalg.norm(q2 - q1)
-    if modulus == 0:
-        modulus = 0.00001
-    v = (q2 - q1) / modulus  # unit directed vector of p1-p2
-    u = np.array([-v[1], v[0]])  # u is perpendicular to v
-    affine = np.array([[u[0], v[0], m[0]],
-                       [u[1], v[1], m[1]]], dtype=np.float32)
-    rows, cols = img_grayscale.shape[:2]
-    transformed_image = cv2.warpAffine(img_grayscale, affine, (cols, rows))
-    # filter response integral H, use the convolution.
-    int_m = np.array(m, dtype=np.int32)
-    x_padding = dog_kernel.shape[1] >> 1
-    y_padding = gaussian_kernel.shape[0] >> 1
-    trimmed_image = trim_image(transformed_image, int_m, x_padding * 2 + x_limit, y_padding * 2 + y_limit)
-    conv_x = cv2.filter2D(trimmed_image, -1, dog_kernel)
-    conv = cv2.filter2D(conv_x, -1, gaussian_kernel)
-    h = np.sum(conv)
-    # from H to H~
-    if h < 0.0:
-        h = 1.0 + np.tanh(h)
-    else:
-        h = 1.0
-    # total edge weight function
-    we = np.linalg.norm((p2 - p1) - (q2 - q1)) ** 2 / (rs ** 2) + a * h
-    return we
-
-
 @ti.kernel
 def affine_and_integral_ti(points: ti.template(),
                            candidate_points: ti.template(),
@@ -130,7 +101,7 @@ def fast_affine_and_trim_ti(q1: ti.types.vector(2, ti.f64),
                             q2: ti.types.vector(2, ti.f64),
                             gray_image: ti.template()):
     # middle point
-    m = (q1 + q2) * 0.5  # 避免除法
+    m = (q1 + q2) * 0.5
     v = tm.normalize(q2 - q1)
     u = ti.Vector([-v[1], v[0]], dt=ti.f64)
     # affine matrix
@@ -145,7 +116,7 @@ def fast_affine_and_trim_ti(q1: ti.types.vector(2, ti.f64),
     m_new_homo = affine @ ti.Vector([m[0], m[1], 0.0], dt=ti.f64)
     # get the size from param box and from the very left top point as initial loop position
     img_trim = ti.Matrix.zero(ti.f64, 16, 10)
-    start_x = ti.i32(m_new_homo[0] - (img_trim.m >> 2))
+    start_x = ti.i32(m_new_homo[0] - (img_trim.m >> 1))
     start_y = ti.i32(m_new_homo[1] - (img_trim.n >> 1))
     for i, j in ti.ndrange(img_trim.n, img_trim.m):
         # use inverse affine matrix to find the original coordinate

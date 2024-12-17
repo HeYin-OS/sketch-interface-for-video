@@ -1,3 +1,5 @@
+from typing import Callable
+
 import colorama
 import cv2
 import numpy as np
@@ -6,6 +8,7 @@ from pypattyrn.creational.singleton import Singleton
 import taichi as ti
 import random
 import time
+import cProfile
 import utils.logging as log
 import utils.image_process as ip
 import utils.yaml_reader as yr
@@ -58,13 +61,34 @@ class LineDrawer(metaclass=Singleton):
     alpha: float = 0.0
     edge_weight_limit: float = 0.0
 
+    # pre-compiled JIT function
+    fast_affine_and_integral_ti: Callable = None
+
     def __init__(self):
-        ti.init(ti.gpu)
+        ti.init(ti.gpu, kernel_profiler=True)
         self.read_yaml_file()
         self.img_work_on = self.img_origin.copy()
         self.img_save_point = self.img_origin.copy()
         if self.console_on:
             colorama.init(autoreset=True)
+
+    def __pre_compile(self):
+        # fake data
+        fake_num = 1
+        current_stroke_ti = ti.Vector.field(2, dtype=ti.f64, shape=fake_num)
+        current_stroke_ti.fill([1.0, 1.0])
+        current_candidates_ti = ti.Vector.field(2, dtype=ti.i32, shape=(1 + fake_num, self.picking_limit))
+        current_candidates_ti.fill([0.0, 0.0])
+        gray_image_ti = ti.field(dtype=ti.i32, shape=self.img_grayscale.shape)
+        gray_image_ti.fill(0)
+        gaussian_kernel_ti = ti.Matrix(self.gaussian_kernel_y1d, dt=ti.f64)
+        dog_kernel_ti = ti.Matrix(self.dog_kernel_x1d, dt=ti.f64)
+        weights = ti.field(ti.f64, shape=(current_stroke_ti.shape[0], self.picking_limit, self.picking_limit))
+        weights.fill(0.0)
+        # compile JIT function
+        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        self.fast_affine_and_integral_ti = ip.affine_and_integral_ti
 
     def read_yaml_file(self):
         config = yr.read_yaml()
@@ -101,6 +125,18 @@ class LineDrawer(metaclass=Singleton):
         self.alpha = config['optimization']['local']['alpha']
         self.edge_weight_limit = config['optimization']['local']['edge_weight_limit']
 
+    def image_pre_process(self):
+        self.img_edge_detection = ip.detect_edge(self.img_origin, self.threshold)
+        # test_img_show("edge_detection", self.img_edge_detection)
+        self.candidates_calculation()
+        self.img_grayscale = ip.grayscale(self.img_origin)
+        # test_img_show("grayscale", self.img_grayscale)
+        self.gaussian_kernel_y1d = ip.create_gaussian_kernel(self.kernel_size, self.sigma_m, 0)
+        # test_img_show("vertical_gaussian", self.img_v_gaussian)
+        self.dog_kernel_x1d = ip.create_dog_kernel(self.kernel_size, self.sigma_c, self.sigma_s, self.rho, 1)
+        # test_img_show("dog_function", self.img_dog)
+        return self
+
     def reload_img(self):
         self.read_yaml_file()
         self.img_work_on = self.img_origin.copy()
@@ -117,6 +153,7 @@ class LineDrawer(metaclass=Singleton):
     def setup(self):
         cv2.imshow(self.windowName, self.img_work_on)  # show the window first time
         cv2.setMouseCallback(f"{self.windowName}", self.draw_line)  # bind to cv2 mouse event
+        self.__pre_compile()  # pre compile JIT function
 
     def draw_line(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:  # event: mouse down
@@ -170,19 +207,6 @@ class LineDrawer(metaclass=Singleton):
         # build current candidates list structure
         self.current_candidate_points = np.full((len(self.current_stroke) + 1, self.picking_limit, 2), -1, dtype=np.int32)
 
-    def laplacian_smoothing(self):
-        for _ in range(self.iter):
-            new_coordinates = self.current_stroke.copy()
-            for i in range(1, len(self.current_stroke) - 1):
-                prev_coordinate = self.current_stroke[i - 1]
-                current_coordinate = self.current_stroke[i]
-                next_coordinate = self.current_stroke[i + 1]
-                new_x = current_coordinate[0] + self.my_lambda * (prev_coordinate[0] + next_coordinate[0] - 2 * current_coordinate[0])
-                new_y = current_coordinate[1] + self.my_lambda * (prev_coordinate[1] + next_coordinate[1] - 2 * current_coordinate[1])
-                new_coordinates[i] = np.array([new_x, new_y])
-            self.current_stroke = new_coordinates.copy()
-        return self
-
     def insert_points(self):
         pass
 
@@ -197,23 +221,11 @@ class LineDrawer(metaclass=Singleton):
                      (self.current_stroke[i + 1][1], self.current_stroke[i + 1][0]),
                      [self.b, self.g, self.r], self.radius, lineType=cv2.LINE_AA, shift=0)
 
-    def image_pre_process(self):
-        self.img_edge_detection = ip.detect_edge(self.img_origin, self.threshold)
-        # test_img_show("edge_detection", self.img_edge_detection)
-        self.candidates_calculation()
-        self.img_grayscale = ip.grayscale(self.img_origin)
-        # test_img_show("grayscale", self.img_grayscale)
-        self.gaussian_kernel_y1d = ip.create_gaussian_kernel(self.kernel_size, self.sigma_m, 0)
-        # test_img_show("vertical_gaussian", self.img_v_gaussian)
-        self.dog_kernel_x1d = ip.create_dog_kernel(self.kernel_size, self.sigma_c, self.sigma_s, self.rho, 1)
-        # test_img_show("dog_function", self.img_dog)
-        return self
-
     def candidates_calculation(self):
         kernel = np.ones((3, 3), np.float64)
         max_filtered = cv2.dilate(self.img_edge_detection, kernel)
         coordinate_bool_map = (max_filtered == self.img_edge_detection) & (self.img_edge_detection != 0.0)
-        test_img_show("all candidates", coordinate_bool_map.astype(np.uint8) * 255)
+        # test_img_show("all candidates", coordinate_bool_map.astype(np.uint8) * 255)
         self.candidates = np.argwhere(coordinate_bool_map)
         self.candidates_kd_tree = scipy.spatial.cKDTree(self.candidates)
         return self
@@ -259,42 +271,15 @@ class LineDrawer(metaclass=Singleton):
         # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
-        ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
-                                  dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
-        print(f"{(time.time_ns() - start) / 1e9}s.")
-        # q1 = self.current_candidate_points[1][0]
-        # q2 = self.current_candidate_points[2][0]
-        # m = (q1 + q2) / 2
-        # modulus = np.linalg.norm(q2 - q1)
-        # if modulus == 0:
-        #     modulus = 0.00001
-        # v = (q2 - q1) / modulus  # unit directed vector of p1-p2
-        # u = np.array([-v[1], v[0]])  # u is perpendicular to v
-        # affine = np.array([[u[0], v[0], m[0]], [u[1], v[1], m[1]]], dtype=np.float32)
-        # rows, cols = self.img_grayscale.shape[:2]
-        # transformed_image = cv2.warpAffine(self.img_grayscale, affine, (cols, rows))
-        # test_img_show("affine", transformed_image)
-        # #  end of kernel function
-        # for i in range(len(self.current_stroke)):
-        #     # p_2 = self.current_stroke[i]
-        #     # q_2 = self.candidates[indices[j]]
-        #     temp_group.append(q_2)
-        #     for k in range(len(self.current_candidate[i])):  # calculate the weights
-        #         if i == 0:
-        #             p_1 = self.current_candidate[i][k]
-        #         else:
-        #             p_1 = self.current_stroke[i - 1]
-        #         q_1 = self.current_candidate[i][k]
-        #         we = ip.get_total_edge_weight(self.img_grayscale, self.x_limit, self.y_limit, self.dog_kernel_x1d, self.gaussian_kernel_y1d,
-        #                                       self.picking_radius, self.alpha, p_1, p_2, q_1, q_2)
-        #         self.weights[(i, k, j)] = we
-        # #  logging of candidates number of every stroke
-        # if self.console_on:
-        #     log.printLog(0, f"The stored weights in the dict", True)
-        #     for (i, j, k), value in self.weights.items():
-        #         log.printLog(0, f"The weight between q[{i:<2},{j:<2}] and q[{i + 1:<2},{k:<2}] is {value}.",
-        #                      False)
-        # self.edge_weight_calculation()
+        # ti.sync()
+        # ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+        #                           dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        self.fast_affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
+                                         dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
+        print(repr(self.fast_affine_and_integral_ti))
+        # ti.profiler.print_kernel_profiler_info()
+        log.printLog(0, f"Integral costs {(time.time_ns() - start) / 1e9}s.", False)
+        # st.plot_taichi_data(weights)
         return self
 
     def show_candidates_window(self):
