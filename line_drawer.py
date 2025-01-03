@@ -65,7 +65,7 @@ class LineDrawer(metaclass=Singleton):
     fast_affine_and_integral_ti: Callable = None
 
     def __init__(self):
-        ti.init(ti.gpu, kernel_profiler=True)
+        ti.init(ti.gpu)
         self.read_yaml_file()
         self.img_work_on = self.img_origin.copy()
         self.img_save_point = self.img_origin.copy()
@@ -252,11 +252,11 @@ class LineDrawer(metaclass=Singleton):
         # gs_results_field.fill(0.0)
         # running taichi kernel function
         start = time.time_ns()
-        ti.sync()
+        # ti.sync()
         ip.affine_and_integral_ti(current_stroke_ti, current_candidates_ti, gray_image_ti,
                                   dog_kernel_ti, gaussian_kernel_ti, self.picking_radius, self.alpha, weights)
-        ti.profiler.print_scoped_profiler_info()
-        ti.profiler.print_kernel_profiler_info('trace')
+        # ti.profiler.print_scoped_profiler_info()
+        # ti.profiler.print_kernel_profiler_info('trace')
         log.printLog(0, f"Integral costs {(time.time_ns() - start) / 1e9}s.", False)
         st.plot_taichi_data(weights)
         return self

@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import taichi as ti
 import taichi.math as tm
-import cProfile
 from PIL import Image
 
 
