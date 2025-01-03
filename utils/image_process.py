@@ -72,19 +72,15 @@ def affine_and_integral_ti(points: ti.template(),
                            weights: ti.template()):
     picking_limit = candidate_points.shape[1]
     one_divide_r_squared = ti.f64(1.0) / r / r
-    for i in range(points.shape[0]):  # for all candidate paths
-        p2 = points[i]
-        p1 = ti.Vector([0, 0], ti.f64)  # pre-defined
-        if i > 0:
-            p1 = points[i - 1]
-        else:
-            p1 = candidate_points[i, 0]
+    for i in range(points.shape[0] - 1):  # for all candidate paths
+        p2 = points[i + 1]
+        p1 = points[i]
         for j in range(picking_limit):  # for all candidate points of prev stroke point
             if candidate_points[i, j].x < 0 or candidate_points[i, j].y < 0:
                 continue
             q1 = candidate_points[i, j]
             p2_p1 = p2 - p1
-            for k in range(picking_limit):  # for all candidate points of prev stroke point
+            for k in range(picking_limit):  # for all candidate points of next stroke point
                 if candidate_points[i + 1, k].x < 0 or candidate_points[i + 1, k].y < 0:
                     continue
                 q2 = candidate_points[i + 1, k]
@@ -148,3 +144,15 @@ def fast_convolution_ti(dog_kernel: ti.types.matrix(n=1, m=3, dtype=ti.f64),
             temp += dog_fld[i + ki, j + kj] * gaussian_kernel[ki, kj]
         gs_fld[i, j] = temp
     return gs_fld.sum()
+
+@ti.kernel
+def fast_dp_ti(points: ti.template(),
+               weights: ti.template(),
+               limit_a: ti.f64,
+               limit_b: ti.f64,
+               dp: ti.template(),
+               prev: ti.template()):
+    path_num = weights.shape[0]
+    sum_dists = ti.f64(0.0)
+
+    return 0
