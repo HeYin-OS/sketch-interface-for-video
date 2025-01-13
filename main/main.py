@@ -7,7 +7,6 @@ def main():
     drawer = line_drawer.LineDrawer()
     drawer.image_pre_process().setup()
     while True:  # regular events of the main thread
-        drawer.read_yaml_file()
         key = cv2.waitKey(1) & 0xFF
         if key == ord(drawer.quit_key):
             break
