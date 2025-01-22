@@ -13,6 +13,7 @@ import utils.image_process as ip
 import utils.logging as log
 import utils.statistics as st
 import utils.yaml_reader as yr
+import utils.json_dumper as jd
 from canvas import Canvas
 from beta.test_func import test_img_show
 
@@ -30,10 +31,6 @@ class LineDrawer(metaclass=Singleton):
         canvas (Canvas): A instance of Canvas class to manage all images
         gaussian_kernel_y1d (np.ndarray): A gaussian kernel with 3 rows * 1 column
         dog_kernel_x1d (np.ndarray): A FDoG kernel with 1 row * 3 columns
-        radius (int): The radius of brush
-        b (int): The blue value of brush
-        g (int): The green value of brush
-        r (int): The red value of brush
         iter (int): Iteration number for laplacian Smoothing
         my_lambda (float): Lambda value for laplacian Smoothing
         picking_limit (int): Limited number of candidate points for each stroke point (Local)
@@ -48,10 +45,6 @@ class LineDrawer(metaclass=Singleton):
     all_canvas: list = []
     gaussian_kernel_y1d: np.ndarray = None
     dog_kernel_x1d: np.ndarray = None
-    radius: int = 0
-    b: float = 0.0
-    g: float = 0.0
-    r: float = 0.0
     iter: int = 0
     my_lambda: float = 0.0
     picking_limit: int = 0
@@ -88,18 +81,18 @@ class LineDrawer(metaclass=Singleton):
         self.quit_key = config["main_settings"]['quitKey']
         self.refresh_key = config["main_settings"]['refreshKey']
         self.console_on = config["main_settings"]['consoleOn']
-        self.radius = config['brush']['radius']
-        self.b = config['brush']['b']
-        self.g = config['brush']['g']
-        self.r = config['brush']['r']
-        self.canvas = Canvas(image, self.b, self.g, self.r, self.radius)
+        self.canvas = Canvas(image,
+                             config['brush']['b'],
+                             config['brush']['g'],
+                             config['brush']['r'],
+                             config['brush']['radius'])
         self.iter = config['laplacian_smoothing']['iter']
         self.my_lambda = config['laplacian_smoothing']['lambda']
         threshold = config['optimization']['local']['threshold']
         self.canvas.calculate_gradient(threshold)
         self.picking_limit = config['optimization']['local']['candidates_limit']
-        mm = config['optimization']['local']['radius']
-        self.picking_radius = ip.mm_to_pixels(mm, config["main_settings"]['testFile'])
+        self.picking_radius = ip.mm_to_pixels(config['optimization']['local']['radius'],
+                                              config["main_settings"]['testFile'])
         self.kernel_size = config['optimization']['local']['kernel_size']
         self.sigma_m = config['optimization']['local']['sigma_m']
         self.sigma_c = config['optimization']['local']['sigma_c']
@@ -138,6 +131,7 @@ class LineDrawer(metaclass=Singleton):
             self.holding = True
 
         elif event == cv2.EVENT_LBUTTONUP:  # event: mouse up
+            # jd.json_dumper(self.canvas.current_stroke)
             self.optimization()
             self.canvas.load_save_point().draw_lines().show_current_image_cv2(self.windowName)
             self.canvas.then()
