@@ -66,7 +66,7 @@ class Canvas:
     def draw_lines_real_time(self):
         if len(self.current_stroke) < 2:
             return self
-        last_index = len(self.all_strokes) - 1
+        last_index = len(self.current_stroke) - 1
         cv2.line(self.current_image,
                  (self.current_stroke[last_index - 1][1], self.current_stroke[last_index - 1][0]),
                  (self.current_stroke[last_index][1], self.current_stroke[last_index][0]),
